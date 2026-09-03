@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<!--
+  Fygaro Catalog Automation
+  Locator tests. Every lookup in src/content/steps.js is run against the real
+  page snapshots, so a Fygaro redeploy that breaks a selector is caught here
+  rather than halfway through a run.
+
+  Open this file directly in Chrome, or run it headless:
+    chrome --headless=new --dump-dom tests/selectors.test.html
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Fygaro locator tests</title>
+  <style>
+    :root { color-scheme: light; }
+    body { margin: 0; padding: 24px; background: #F6F7F9; color: #1A1F26;
+           font: 13px/1.5 -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+    h1 { font-size: 18px; margin: 0 0 4px; }
+    p.lead { margin: 0 0 20px; color: #5B6673; }
+    #summary { display: inline-block; padding: 8px 14px; border-radius: 6px; font-weight: 600; margin-bottom: 16px; }
+    #summary.pass { background: #E9F7EF; color: #17803D; border: 1px solid #17803D; }
+    #summary.fail { background: #FDECEC; color: #C02626; border: 1px solid #C02626; }
+    ul { list-style: none; margin: 0; padding: 0; max-width: 900px; }
+    li { background: #fff; border: 1px solid #E3E6EA; border-radius: 6px; padding: 8px 12px; margin-bottom: 6px; }
+    li.bad { border-color: #C02626; background: #FDECEC; }
+    .tag { font-weight: 600; margin-right: 8px; }
+    li.ok .tag { color: #17803D; }
+    li.bad .tag { color: #C02626; }
+    .detail { color: #5B6673; font-family: ui-monospace, Consolas, monospace; font-size: 11px; }
+    #stage { position: absolute; left: -99999px; top: 0; width: 1200px; }
+  </style>
+</head>
+<body>
+  <h1>Fygaro locator tests</h1>
+  <p class="lead">Runs every locator in <code>src/content/steps.js</code> against the captured page snapshots.</p>
+  <div id="summary">Running...</div>
+  <ul id="results"></ul>
+
+  <!-- Snapshots are injected here so they render and pass visibility checks. -->
+  <div id="stage"></div>
+
+  <script src="fixtures/snapshots.js"></script>
+  <script src="../src/shared/util.js"></script>
+  <script src="../src/shared/price.js"></script>
+  <script src="../src/shared/state.js"></script>
+  <script src="../src/content/dom.js"></script>
+  <script src="../src/content/steps.js"></script>
+  <script>
+  (function () {
+    'use strict';
+
+    var U = FYG.util;
+    var D = FYG.dom;
+    var S = FYG.state;
+    var locate = FYG.steps.locate;
+
+    var results = [];
+    function check(name, fn) {
+      try {
+        var detail = fn();
+        results.push({ ok: true, name: name, detail: detail || '' });
+      } catch (err) {
+        results.push({ ok: false, name: name, detail: String(err && err.message ? err.message : err) });
+      }
+    }
+
+    function assert(condition, message) {
+      if (!condition) throw new Error(message);
+    }
+
+    var stage = document.getElementById('stage');
+    function mount(snapshot) {
+      assert(window.FYG_SNAPSHOTS[snapshot], 'snapshot "' + snapshot + '" is missing');
+      stage.innerHTML = window.FYG_SNAPSHOTS[snapshot];
+      return stage;
+    }
+
+    /* ------------------------------------------------------------- routes */
+
+    check('routes: every page url is recognised', function () {
+      var cases = {
+        '/en/app/dashboard/': 'dashboard',
+        '/en/app/products/': 'productList',
+        '/en/app/products/add/': 'productAdd',
+        '/en/app/products/c8faacb1-fafc-4672-a50d-ee8edc325bd0/permalink/product/': 'productDetail',
+        '/en/app/payment-buttons/payments/payment-buttons/add/': 'linkAdd',
+        '/en/app/payment-buttons/payments/75fed96c-a3d5-4f52-a494-8fb0498cc68e/payment-buttons/permalink/': 'linkDone',
+        '/es/app/dashboard/': 'dashboard',
+        '/en/app/clients/': ''
+      };
+      Object.keys(cases).forEach(function (path) {
+        var got = S.routeOf(path);
+        assert(got === cases[path], path + ' resolved to "' + got + '" instead of "' + cases[path] + '"');
+      });
+      return Object.keys(cases).length + ' urls';
+    });
+
+    check('routes: the products list is not confused with the add form', function () {
+      assert(S.routeOf('/en/app/products/add/') === 'productAdd', 'add form misread');
+      assert(S.routeOf('/en/app/products/') === 'productList', 'list misread');
+      return 'ok';
+    });
+
+    /* ---------------------------------------------------- step 1 dashboard */
+
+    check('step 1: finds Products in the dashboard sidebar', function () {
+      var scope = mount('dashboard');
+      var link = locate.productsSidebarLink(scope);
+      assert(link, 'no Products link found');
+      assert(link.getAttribute('href') === '/en/app/products/', 'wrong href: ' + link.getAttribute('href'));
+      assert(U.textOf(link) === 'Products', 'wrong text: ' + U.textOf(link));
+      return D.describe(link);
+    });
+
+    check('step 1: does not grab the "Create Product" quick action', function () {
+      var scope = mount('dashboard');
+      var link = locate.productsSidebarLink(scope);
+      assert(link.getAttribute('href').indexOf('/add/') === -1, 'picked the add link instead of the section link');
+      return 'rejected /products/add/';
+    });
+
+    /* ------------------------------------------------ step 2 products list */
+
+    check('step 2: picks the top right Create on the empty products page', function () {
+      var scope = mount('products_empty');
+      var link = locate.createItemLink(scope);
+      assert(link, 'no Create link found');
+      assert(link.getAttribute('href') === '/en/app/products/add/', 'wrong href');
+      var centred = locate.emptyStateCreateLink(scope);
+      assert(centred, 'the centred Create link should exist in this snapshot');
+      assert(link !== centred, 'picked the centred Create link, which must be ignored');
+      return 'chose the toolbar link, rejected the centred one';
+    });
+
+    check('step 2: picks the top right Create on a populated products page', function () {
+      var scope = mount('products');
+      var link = locate.createItemLink(scope);
+      assert(link, 'no Create link found');
+      var centred = locate.emptyStateCreateLink(scope);
+      assert(link !== centred, 'picked the centred Create link');
+      assert(link.parentElement.querySelector('i[class*="fa-refresh"]'), 'the chosen link is not in the header toolbar');
+      return D.describe(link);
+    });
+
+    /* ------------------------------------------------- step 3 product form */
+
+    check('step 3: the product form exposes every field the step writes', function () {
+      var scope = mount('add');
+      assert(D.first('input[name="name"]', scope), 'Name field missing');
+      assert(D.first('input[name="code"]', scope), 'Code field missing');
+      assert(D.first('input[name="price"]', scope), 'Price field missing');
+      return 'name, code, price';
+    });
+
+    check('step 3: the responsive layout really does duplicate the dropdowns', function () {
+      var scope = mount('add');
+      ['currency', 'product_type', 'show_in_website'].forEach(function (name) {
+        var all = D.all('select[name="' + name + '"]', scope);
+        assert(all.length === 2, name + ' appeared ' + all.length + ' times, expected 2');
+      });
+      return 'each dropdown exists twice, so all copies must be written';
+    });
+
+    check('step 3: USD, Service and No resolve by label, not by hard coded value', function () {
+      var scope = mount('add');
+      function optionValueFor(name, label) {
+        var el = D.all('select[name="' + name + '"]', scope)[0];
+        var match = Array.prototype.filter.call(el.options, function (o) {
+          return U.foldText(o.textContent) === U.foldText(label);
+        })[0];
+        assert(match, 'no "' + label + '" option in ' + name);
+        return match.value;
+      }
+      assert(optionValueFor('currency', 'USD') === '2', 'USD is not value 2');
+      assert(optionValueFor('product_type', 'Service') === '2', 'Service is not value 2');
+      assert(optionValueFor('show_in_website', 'No') === 'false', 'No is not value false');
+      return 'USD=2, Service=2, No=false';
+    });
+
+    check('step 3: Service is chosen rather than Product', function () {
+      var scope = mount('add');
+      var el = D.all('select[name="product_type"]', scope)[0];
+      var product = Array.prototype.filter.call(el.options, function (o) { return U.foldText(o.textContent) === 'product'; })[0];
+      var service = Array.prototype.filter.call(el.options, function (o) { return U.foldText(o.textContent) === 'service'; })[0];
+      assert(product && service, 'both Product and Service options should exist');
+      assert(product.value !== service.value, 'Product and Service must be distinguishable');
+      return 'Product=' + product.value + ' Service=' + service.value;
+    });
+
+    check('step 3: finds the Save button', function () {
+      var scope = mount('add');
+      var save = locate.saveButton(scope);
+      assert(save, 'no Save button found');
+      assert(U.foldText(save.textContent) === 'save', 'wrong button: ' + U.textOf(save));
+      return D.describe(save);
+    });
+
+    /* --------------------------------------------------- step 4 list match */
+
+    check('step 4: finds a product by name and code', function () {
+      var scope = mount('products');
+      var hit = locate.productListItem(scope, 'test', 'test');
+      assert(hit, 'the product row was not found');
+      assert(U.extractUuid(hit.getAttribute('href')) === 'c8faacb1-fafc-4672-a50d-ee8edc325bd0', 'wrong uuid');
+      return U.extractUuid(hit.getAttribute('href'));
+    });
+
+    check('step 4: the "View" label is stripped before comparing the name', function () {
+      var scope = mount('products');
+      var raw = U.textOf(stage.querySelector('li h3'));
+      assert(raw === 'Viewtest', 'snapshot changed, raw h3 text is "' + raw + '"');
+      assert(locate.productListItem(scope, 'test', 'test'), 'name did not match once View was stripped');
+      assert(!locate.productListItem(scope, 'Viewtest', 'test'), '"Viewtest" must not match');
+      return 'raw "' + raw + '" matched as "test"';
+    });
+
+    check('step 4: a wrong name or wrong code does not match', function () {
+      var scope = mount('products');
+      assert(!locate.productListItem(scope, 'not the product', 'test'), 'a wrong name matched');
+      assert(!locate.productListItem(scope, 'test', 'WRONG-CODE'), 'a wrong code matched');
+      return 'both rejected';
+    });
+
+    check('step 4: an empty products list yields no match', function () {
+      var scope = mount('products_empty');
+      assert(!locate.productListItem(scope, 'test', 'test'), 'matched something on an empty list');
+      return 'no false positive';
+    });
+
+    /* -------------------------------------------------- step 5 product page */
+
+    check('step 5: finds "Create Fygaro Link for Product"', function () {
+      var scope = mount('edit-product');
+      var el = locate.createLinkAction(scope);
+      assert(el, 'the action was not found');
+      assert(el.getAttribute('href') === '/en/app/payment-buttons/payments/payment-buttons/add/', 'wrong href');
+      assert(U.foldText(el.textContent).indexOf('create fygaro link') === 0, 'wrong text: ' + U.textOf(el));
+      return D.describe(el);
+    });
+
+    check('step 5: the product page carries the values used to verify the row', function () {
+      var scope = mount('edit-product');
+      assert(D.first('input[name="name"]', scope).value === 'test', 'name not readable');
+      assert(D.first('input[name="code"]', scope).value === 'test', 'code not readable');
+      return 'name and code readable';
+    });
+
+    check('step 5: Save and Delete are not mistaken for each other', function () {
+      var scope = mount('edit-product');
+      var save = locate.saveButton(scope);
+      assert(U.foldText(save.textContent) === 'save', 'picked "' + U.textOf(save) + '" instead of Save');
+      return D.describe(save);
+    });
+
+    /* ------------------------------------------------------ step 6 link form */
+
+    check('step 6: the collapsed link form has no requirement checkboxes yet', function () {
+      var scope = mount('link-add');
+      assert(!locate.requirementCheckbox(scope, 'require_phone'), 'Advanced Options should start collapsed');
+      assert(locate.advancedOptionsToggle(scope), 'the Advanced Options toggle was not found');
+      return 'collapsed, toggle present';
+    });
+
+    check('step 6: the toggle is found whether it says Show or Hide', function () {
+      var collapsed = locate.advancedOptionsToggle(mount('link-add'));
+      var expanded = locate.advancedOptionsToggle(mount('link_advance'));
+      assert(collapsed && U.foldText(collapsed.textContent).indexOf('show') !== -1, 'Show state not matched');
+      assert(expanded && U.foldText(expanded.textContent).indexOf('hide') !== -1, 'Hide state not matched');
+      return 'matched on "Advanced Options", not on Show or Hide';
+    });
+
+    check('step 6: finds all three requirement checkboxes once expanded', function () {
+      var scope = mount('link_advance');
+      ['require_phone', 'require_legal_id', 'require_billing_address'].forEach(function (name) {
+        var box = locate.requirementCheckbox(scope, name);
+        assert(box, name + ' was not found');
+        assert(box.type === 'checkbox', name + ' is not a checkbox');
+        assert(box.checked === false, name + ' should start unticked in this snapshot');
+      });
+      return 'phone, legal id, billing address';
+    });
+
+    check('step 6: each checkbox sits beside the label the user was shown', function () {
+      var scope = mount('link_advance');
+      var expected = { require_phone: 'phone*', require_legal_id: 'legal id*', require_billing_address: 'billing address*' };
+      Object.keys(expected).forEach(function (name) {
+        var box = locate.requirementCheckbox(scope, name);
+        var label = box.closest('label');
+        assert(label, name + ' has no label');
+        assert(U.foldText(label.textContent) === expected[name],
+          name + ' is labelled "' + U.textOf(label) + '", expected "' + expected[name] + '"');
+      });
+      return 'labels confirm the name mapping';
+    });
+
+    check('step 6: Client Note and the other optional fields are left alone', function () {
+      var scope = mount('link_advance');
+      var extras = ['allow_client_note', 'require_jwt', 'manual_capture', 'expires'];
+      extras.forEach(function (name) {
+        var box = D.first('input[type="checkbox"][name="' + name + '"]', scope);
+        assert(box, name + ' should be present in this snapshot');
+        assert(box.checked === false, name + ' must stay unticked');
+      });
+      return extras.length + ' optional fields untouched';
+    });
+
+    check('step 6: the max_successful_payments name collision is handled', function () {
+      var scope = mount('link_advance');
+      var all = D.all('[name="max_successful_payments"]', scope);
+      assert(all.length === 2, 'expected the name to appear twice, saw ' + all.length);
+      var box = D.first('input[type="checkbox"][name="max_successful_payments"]', scope);
+      var num = D.first('input[type="number"][name="max_successful_payments"]', scope);
+      assert(box && box.type === 'checkbox', 'the checkbox was not isolated');
+      assert(num && num.type === 'number', 'the number input was not isolated');
+      assert(box !== num, 'the two controls must be distinguishable');
+      return 'type qualified selectors keep them apart';
+    });
+
+    check('step 6: the link form Name field and currency are reachable', function () {
+      var scope = mount('link-add');
+      assert(D.first('input[name="name"]', scope), 'Name field missing');
+      var currency = D.all('select[name="currency"]', scope);
+      assert(currency.length === 1, 'expected one currency select, saw ' + currency.length);
+      var usd = Array.prototype.filter.call(currency[0].options, function (o) { return U.foldText(o.textContent) === 'usd'; })[0];
+      assert(usd && usd.value === '2', 'USD option missing or renumbered');
+      return 'name field and USD option present';
+    });
+
+    check('step 6: the attached product code is visible for the safety check', function () {
+      var scope = mount('link-add');
+      assert(U.foldText(scope.textContent).indexOf('code: test') !== -1, 'the attached product code is not shown');
+      return 'code shown on the form';
+    });
+
+    /* ------------------------------------------------------ step 7 the link */
+
+    check('step 7: reads the generated link from the confirmation page', function () {
+      var scope = mount('link_success');
+      var link = locate.generatedLink(scope);
+      assert(link === 'https://www.fygaro.com/en/pb/75fed96c-a3d5-4f52-a494-8fb0498cc68e/', 'got "' + link + '"');
+      return link;
+    });
+
+    check('step 7: finds Copy Link and Back to Home', function () {
+      var scope = mount('link_success');
+      assert(locate.copyLinkButton(scope), 'Copy Link button not found');
+      var home = locate.backHomeLink(scope);
+      assert(home, 'Back to Home link not found');
+      assert(home.getAttribute('href') === '/en/app/dashboard/', 'wrong href: ' + home.getAttribute('href'));
+      assert(U.textOf(home) === 'Back to Home', 'wrong text: ' + U.textOf(home));
+      return D.describe(home);
+    });
+
+    check('step 7: no link is reported on a page that has none', function () {
+      assert(!locate.generatedLink(mount('link-add')), 'found a link on the form page');
+      assert(!locate.generatedLink(mount('dashboard')), 'found a link on the dashboard');
+      return 'no false positive';
+    });
+
+    /* --------------------------------------------------- react value writing */
+
+    check('React aware writes update the value and fire input and change', function () {
+      var scope = mount('add');
+      var input = D.first('input[name="code"]', scope);
+      var seen = [];
+      input.addEventListener('input', function () { seen.push('input'); });
+      input.addEventListener('change', function () { seen.push('change'); });
+      var ok = D.fillText(input, 'CT-ING-PRE-EQ-01');
+      assert(ok, 'the value did not stick');
+      assert(input.value === 'CT-ING-PRE-EQ-01', 'value is "' + input.value + '"');
+      assert(seen.indexOf('input') !== -1 && seen.indexOf('change') !== -1, 'events fired: ' + seen.join(','));
+      return 'value set, events ' + seen.join(' + ');
+    });
+
+    check('checkbox writes go through a real click', function () {
+      var scope = mount('link_advance');
+      var box = locate.requirementCheckbox(scope, 'require_phone');
+      var clicks = 0;
+      box.addEventListener('click', function () { clicks++; });
+      assert(D.setChecked(box, true), 'the checkbox did not tick');
+      assert(box.checked === true, 'not checked afterwards');
+      assert(clicks === 1, 'expected exactly one click, saw ' + clicks);
+      assert(D.setChecked(box, true), 'a second call should be a no op');
+      assert(clicks === 1, 'a no op must not click again, saw ' + clicks);
+      return 'ticked once, idempotent';
+    });
+
+    check('accented and cased text still matches', function () {
+      assert(U.foldText('Evaluación PSICOLÓGICA') === 'evaluacion psicologica', 'folding failed');
+      assert(U.normText('Show  Advanced   Options') === 'Show Advanced Options', 'nbsp not normalised');
+      return 'accents folded, nbsp normalised';
+    });
+
+    /* ------------------------------------------------------------- rendering */
+
+    stage.innerHTML = '';
+
+    var failed = results.filter(function (r) { return !r.ok; });
+    var summary = document.getElementById('summary');
+    summary.className = failed.length ? 'fail' : 'pass';
+    summary.textContent = failed.length
+      ? failed.length + ' of ' + results.length + ' checks FAILED'
+      : 'All ' + results.length + ' checks passed';
+    document.title = (failed.length ? 'FAIL ' + failed.length + '/' : 'PASS 0/') + results.length;
+
+    var list = document.getElementById('results');
+    results.forEach(function (r) {
+      var li = document.createElement('li');
+      li.className = r.ok ? 'ok' : 'bad';
+      var tag = document.createElement('span');
+      tag.className = 'tag';
+      tag.textContent = r.ok ? 'PASS' : 'FAIL';
+      var name = document.createElement('span');
+      name.textContent = r.name;
+      var detail = document.createElement('div');
+      detail.className = 'detail';
+      detail.textContent = r.detail;
+      li.appendChild(tag);
+      li.appendChild(name);
+      li.appendChild(detail);
+      list.appendChild(li);
+    });
+  })();
+  </script>
+</body>
+</html>
