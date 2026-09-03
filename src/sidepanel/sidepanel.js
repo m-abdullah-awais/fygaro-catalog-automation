@@ -376,7 +376,7 @@
     $('btnPause').disabled = !running;
     $('btnStop').disabled = run.status === S.STATUS.IDLE || run.status === S.STATUS.DONE;
 
-    ['minDelay', 'maxDelay', 'stepTimeout', 'maxAttempts', 'dryRun'].forEach(function (id) {
+    ['minDelay', 'maxDelay', 'stepTimeout', 'maxAttempts', 'zoomPercent', 'dryRun'].forEach(function (id) {
       $(id).disabled = running;
     });
     ['sheetSelect', 'mapName', 'mapCode', 'mapPrice', 'mapLink'].forEach(function (id) {
@@ -404,6 +404,7 @@
     $('maxDelay').value = run.settings.maxDelayMs;
     $('stepTimeout').value = run.settings.stepTimeoutMs;
     $('maxAttempts').value = run.settings.maxAttempts;
+    $('zoomPercent').value = run.settings.zoomPercent;
     $('dryRun').checked = !!run.settings.dryRun;
   }
 
@@ -628,6 +629,7 @@
         maxDelayMs: max,
         stepTimeoutMs: U.clamp(parseInt($('stepTimeout').value, 10) || 20000, 5000, 120000),
         maxAttempts: U.clamp(parseInt($('maxAttempts').value, 10) || 2, 1, 5),
+        zoomPercent: U.clamp(parseInt($('zoomPercent').value, 10) || 100, 25, 200),
         dryRun: $('dryRun').checked
       }
     });
@@ -681,7 +683,7 @@
       });
     });
 
-    ['minDelay', 'maxDelay', 'stepTimeout', 'maxAttempts'].forEach(function (id) {
+    ['minDelay', 'maxDelay', 'stepTimeout', 'maxAttempts', 'zoomPercent'].forEach(function (id) {
       $(id).addEventListener('change', pushSettings);
     });
     $('dryRun').addEventListener('change', function () { pushSettings().then(refresh); });

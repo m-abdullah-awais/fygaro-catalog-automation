@@ -99,6 +99,37 @@ function navigate(run, url) {
   });
 }
 
+/*
+ * Zoom is deliberately real browser zoom rather than a CSS transform, because
+ * only real zoom changes the layout viewport, which is what Fygaro's responsive
+ * breakpoints actually respond to.
+ *
+ * The default per-origin scope is what is wanted here: per-tab zoom is reset on
+ * every navigation, and this run navigates constantly.
+ */
+function applyZoom(run) {
+  if (run.tabId == null) return Promise.resolve(false);
+  var target = (run.settings.zoomPercent || 100) / 100;
+
+  return chrome.tabs.getZoom(run.tabId).then(function (current) {
+    // Only the first capture counts, so pausing and resuming cannot record the
+    // automation's own zoom as the value to restore later.
+    if (run.originalZoom == null) run.originalZoom = current;
+    if (Math.abs(current - target) < 0.001) return false;
+    return chrome.tabs.setZoom(run.tabId, target).then(function () { return true; });
+  }).catch(function () {
+    return false;
+  });
+}
+
+/** Hands the page back the zoom it had before the run started. */
+function restoreZoom(run) {
+  var back = run.originalZoom;
+  run.originalZoom = null;
+  if (run.tabId == null || back == null) return Promise.resolve();
+  return chrome.tabs.setZoom(run.tabId, back).catch(function () {});
+}
+
 function raiseAttention(bucket, message, url) {
   var row = currentRow(bucket);
   bucket.run.status = S.STATUS.ATTENTION;
@@ -148,7 +179,7 @@ function completeRow(bucket, status, link) {
       run.stats.skipped + ' skipped, ' + run.stats.failed + ' failed.');
     bucket.logDirty = true;
     notify('Fygaro automation finished', run.stats.done + ' links created, ' + run.stats.failed + ' failed.');
-    return Promise.resolve();
+    return restoreZoom(run);
   }
 
   run.cursor = next;
@@ -191,8 +222,13 @@ handlers[S.MSG.LOAD_CATALOG] = function (msg, bucket) {
   bucket.rowsDirty = true;
 
   var settings = bucket.run.settings;
+  var originalZoom = bucket.run.originalZoom;
+  var tabId = bucket.run.tabId;
   bucket.run = S.defaultRun();
   bucket.run.settings = settings;
+  // Carried over so a zoom this extension applied is still owed back.
+  bucket.run.originalZoom = originalZoom;
+  bucket.run.tabId = tabId;
   bucket.run.file = msg.file || null;
   bucket.run.stats = S.recount(rows);
 
@@ -237,7 +273,16 @@ handlers[S.MSG.START] = function (msg, bucket) {
       ? 'Dry run started. The product form will be filled for row ' + bucket.rows[first].sheetRow + ' and left unsaved.'
       : 'Run started at row ' + bucket.rows[first].sheetRow + '.');
     bucket.logDirty = true;
-    return navigate(run, S.APP_URL);
+
+    // Zoom first, then navigate, so the very first page already renders at the
+    // layout the steps expect.
+    return applyZoom(run).then(function (changed) {
+      if (changed) {
+        log(bucket, 'info', 'Page zoom set to ' + (run.settings.zoomPercent || 100) +
+          '% so the side panel cannot change the layout. It is put back when the run ends.');
+      }
+      return navigate(run, S.APP_URL);
+    });
   }).then(function () {
     return { ok: true };
   });
@@ -262,7 +307,7 @@ handlers[S.MSG.RESUME] = function (msg, bucket) {
   bucket.run.waitingSince = null;
   log(bucket, 'info', 'Resumed.');
   bucket.logDirty = true;
-  return Promise.resolve({ ok: true });
+  return applyZoom(bucket.run).then(function () { return { ok: true }; });
 };
 
 handlers[S.MSG.RETRY] = function (msg, bucket) {
@@ -302,11 +347,13 @@ handlers[S.MSG.STOP] = function (msg, bucket) {
   bucket.run.stats = S.recount(bucket.rows);
   log(bucket, 'info', 'Stopped. Progress is kept, so Start will carry on from here.');
   bucket.logDirty = true;
-  return Promise.resolve({ ok: true });
+  return restoreZoom(bucket.run).then(function () { return { ok: true }; });
 };
 
-handlers[S.MSG.RESET] = function () {
-  return S.clear().then(function () {
+handlers[S.MSG.RESET] = function (msg, bucket) {
+  return restoreZoom(bucket.run).then(function () {
+    return S.clear();
+  }).then(function () {
     return updateBadge(S.defaultRun());
   }).then(broadcast).then(function () {
     return { ok: true, handled: true };

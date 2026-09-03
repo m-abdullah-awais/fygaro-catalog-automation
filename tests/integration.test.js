@@ -18,7 +18,8 @@
   var SHEET = 'Logros ';
 
   var results = [];
-  var recorded = { badges: [], notifications: [], tabUpdates: [], downloads: [] };
+  var recorded = { badges: [], notifications: [], tabUpdates: [], downloads: [], actions: [] };
+  var currentZoom = 1;
 
   function assert(condition, message) {
     if (!condition) throw new Error(message);
@@ -122,11 +123,21 @@
       create: function (props) {
         var tab = { id: nextTabId++, url: props.url };
         recorded.tabUpdates.push(props.url);
+        recorded.actions.push('nav:' + props.url);
         return Promise.resolve(tab);
       },
       update: function (id, props) {
-        if (props.url) recorded.tabUpdates.push(props.url);
+        if (props.url) {
+          recorded.tabUpdates.push(props.url);
+          recorded.actions.push('nav:' + props.url);
+        }
         return Promise.resolve({ id: id });
+      },
+      getZoom: function () { return Promise.resolve(currentZoom); },
+      setZoom: function (id, factor) {
+        currentZoom = factor;
+        recorded.actions.push('zoom:' + factor);
+        return Promise.resolve();
       },
       onRemoved: { addListener: function () {} }
     },
@@ -282,6 +293,27 @@
             assert(recorded.tabUpdates.indexOf(S.APP_URL) !== -1, 'the Fygaro tab was not opened');
             return 'running at sheet row ' + data.rows[0].sheetRow;
           });
+      });
+    })
+
+    .then(function () {
+      return check('the page is zoomed out before the run navigates to work', function () {
+        assert(Math.abs(currentZoom - 0.67) < 0.001, 'the page zoom is ' + currentZoom + ', expected 0.67');
+
+        // Chrome keys zoom to the origin, so a fygaro.com page has to be loaded
+        // before the zoom can be set at all. What must be guaranteed is that the
+        // navigation the run actually starts from happens after the zoom.
+        var zoomAt = recorded.actions.indexOf('zoom:0.67');
+        var lastNavAt = recorded.actions.lastIndexOf('nav:' + S.APP_URL);
+        assert(zoomAt !== -1, 'the zoom was never applied');
+        assert(lastNavAt !== -1, 'the tab was never sent to the dashboard');
+        assert(zoomAt < lastNavAt, 'the run must reload the page after zooming, order was ' +
+          recorded.actions.join(' then '));
+
+        return readState().then(function (data) {
+          assert(data.run.originalZoom === 1, 'the original zoom was recorded as ' + data.run.originalZoom);
+          return 'zoomed to 67%, then reloaded at that zoom, original 100% remembered';
+        });
       });
     })
 
@@ -518,6 +550,23 @@
                 done.map(function (r) { return r.sheetRow; }).join(' and ');
             });
         });
+      });
+    })
+
+    .then(function () {
+      return check('stopping hands the page zoom back to the user', function () {
+        assert(Math.abs(currentZoom - 0.67) < 0.001, 'precondition: the run should still be zoomed out');
+        $('btnStop').click();
+        return waitUntil(function () { return $('statusPill').dataset.status === 'idle'; }, 'the stop')
+          .then(function () {
+            return waitUntil(function () { return Math.abs(currentZoom - 1) < 0.001; },
+              'the zoom to be restored');
+          })
+          .then(readState)
+          .then(function (data) {
+            assert(data.run.originalZoom === null, 'the remembered zoom should be cleared once given back');
+            return 'page returned to 100%';
+          });
       });
     })
 

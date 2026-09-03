@@ -105,6 +105,11 @@
     maxDelayMs: 3000,
     stepTimeoutMs: 20000,
     maxAttempts: 2,
+    /* The side panel takes width away from the page, which can push Fygaro's
+     * responsive layout over a breakpoint and swap which copy of a duplicated
+     * control is on screen. Zooming out gives the page its room back and keeps
+     * the desktop layout, so the DOM stays the one the steps were written for. */
+    zoomPercent: 67,
     dryRun: false
   };
 
@@ -153,6 +158,8 @@
       finishedAt: null,
       rowStartedAt: null,
       waitingSince: null,
+      /* The page zoom before the run touched it, so it can be handed back. */
+      originalZoom: null,
       durations: [],
       stats: { total: 0, toProcess: 0, done: 0, failed: 0, skipped: 0 }
     };
