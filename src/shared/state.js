@@ -16,6 +16,9 @@
   S.KEY_RUN = 'fyg_run';
   S.KEY_ROWS = 'fyg_rows';
   S.KEY_LOG = 'fyg_log';
+  /* The workbook bytes are kept too, so the updated file can still be exported
+   * after the panel is closed and reopened, or after a browser restart. */
+  S.KEY_FILE = 'fyg_file';
   S.LOG_CAP = 500;
 
   /** Run level status. */
@@ -184,7 +187,7 @@
   };
 
   S.clear = function () {
-    return chrome.storage.local.remove([S.KEY_RUN, S.KEY_ROWS, S.KEY_LOG]);
+    return chrome.storage.local.remove([S.KEY_RUN, S.KEY_ROWS, S.KEY_LOG, S.KEY_FILE]);
   };
 
   /** Recomputes the counters shown in the side panel. */
@@ -195,7 +198,8 @@
       if (s === S.ROW.DONE) stats.done++;
       else if (s === S.ROW.FAILED) stats.failed++;
       else if (s === S.ROW.SKIPPED) stats.skipped++;
-      if (s === S.ROW.PENDING || s === S.ROW.ACTIVE || s === S.ROW.FAILED) stats.toProcess++;
+      // Failed rows are not retried automatically, so they are not still to do.
+      if (s === S.ROW.PENDING || s === S.ROW.ACTIVE) stats.toProcess++;
     }
     return stats;
   };

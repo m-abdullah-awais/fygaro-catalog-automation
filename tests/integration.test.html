@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<!--
+  Fygaro Catalog Automation
+  End to end test of the real side panel driving the real background worker.
+
+  The Chrome APIs are stubbed with an in memory implementation, then the actual
+  markup, the actual sidepanel.js and the actual service-worker.js are loaded and
+  a full run is played through: load the catalog, start, walk all seven steps for
+  several rows, handle a failure, skip a row, and export the updated workbook.
+
+  Headless:
+    chrome --headless=new --allow-file-access-from-files --dump-dom tests/integration.test.html
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Fygaro integration tests</title>
+  <link rel="stylesheet" href="../src/sidepanel/sidepanel.css">
+  <style>
+    body { padding: 24px; }
+    #report { max-width: 900px; margin-bottom: 24px; }
+    #summary { display: inline-block; padding: 8px 14px; border-radius: 6px; font-weight: 600; margin-bottom: 16px; }
+    #summary.pass { background: #E9F7EF; color: #17803D; border: 1px solid #17803D; }
+    #summary.fail { background: #FDECEC; color: #C02626; border: 1px solid #C02626; }
+    #summary.wait { background: #FFF; color: #5B6673; border: 1px solid #CBD2D9; }
+    #report ul { list-style: none; margin: 0; padding: 0; }
+    #report li { background: #fff; border: 1px solid #E3E6EA; border-radius: 6px; padding: 8px 12px; margin-bottom: 6px; font-size: 13px; }
+    #report li.bad { border-color: #C02626; background: #FDECEC; }
+    .tag { font-weight: 600; margin-right: 8px; }
+    li.ok .tag { color: #17803D; }
+    li.bad .tag { color: #C02626; }
+    .detail { color: #5B6673; font-family: ui-monospace, Consolas, monospace; font-size: 11px; }
+    #panel { max-width: 420px; border: 1px solid #CBD2D9; border-radius: 10px; overflow: hidden; }
+  </style>
+</head>
+<body>
+  <div id="report">
+    <h1 style="font-size:18px;margin:0 0 4px">Fygaro integration tests</h1>
+    <p style="margin:0 0 20px;color:#5B6673">The real side panel and the real background worker, wired together
+      over stubbed Chrome APIs and driven through a full run.</p>
+    <div id="summary" class="wait">Running...</div>
+    <ul id="results"></ul>
+  </div>
+
+  <h2 style="font-size:13px;color:#5B6673;text-transform:uppercase;letter-spacing:.04em">Live panel</h2>
+  <div id="panel"></div>
+
+  <script src="../src/shared/util.js"></script>
+  <script src="../src/shared/price.js"></script>
+  <script src="../src/shared/state.js"></script>
+  <script src="../src/shared/zip.js"></script>
+  <script src="../src/shared/xlsx-read.js"></script>
+  <script src="../src/shared/xlsx-write.js"></script>
+  <script src="integration.test.js"></script>
+</body>
+</html>

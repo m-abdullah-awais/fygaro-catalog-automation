@@ -176,10 +176,11 @@ handlers[S.MSG.LOAD_CATALOG] = function (msg, bucket) {
       priceRaw: r.priceRaw,
       priceText: r.priceText,
       link: r.link || '',
-      // A row that already carries a link is left alone. This is what makes a
-      // restart safe after an interruption.
-      status: r.link ? S.ROW.SKIPPED : S.ROW.PENDING,
-      error: '',
+      // A row that already carries a link is left alone, which is what makes a
+      // restart safe. A row missing a name, code or readable price is marked
+      // failed up front rather than breaking the run halfway through.
+      status: r.link ? S.ROW.SKIPPED : (r.blocked ? S.ROW.FAILED : S.ROW.PENDING),
+      error: r.link ? '' : (r.blocked ? r.blockedReason || 'This row cannot be processed.' : ''),
       productUuid: '',
       finishedAt: null
     };

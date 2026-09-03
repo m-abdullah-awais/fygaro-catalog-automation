@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Fygaro Catalog Automation</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+<div class="app">
+
+  <header class="masthead">
+    <img class="mark" src="../../icons/icon48.png" alt="">
+    <h1>Fygaro Catalog
+      <span class="sub">Products and payment links from your spreadsheet</span>
+    </h1>
+    <span class="pill" id="statusPill" data-status="idle" role="status" aria-live="polite">Idle</span>
+  </header>
+
+  <!-- Shown only when a step could not be completed. -->
+  <section class="banner attention hidden" id="attentionBanner">
+    <h3 id="attentionTitle">Needs your attention</h3>
+    <p id="attentionMessage"></p>
+    <p class="where" id="attentionWhere"></p>
+    <div class="actions">
+      <button type="button" class="primary" id="btnRetry">Retry this step</button>
+      <button type="button" id="btnSkip">Skip this row</button>
+      <button type="button" class="danger" id="btnStopFromBanner">Stop</button>
+    </div>
+  </section>
+
+  <!-- 1. Catalog -->
+  <section class="card">
+    <h2><span class="num">1</span> Catalog <span class="spacer"></span>
+      <button type="button" class="subtle hidden" id="btnChangeFile">Change file</button>
+    </h2>
+
+    <div id="fileEmpty">
+      <label class="dropzone" id="dropzone">
+        <strong>Choose your catalog</strong>
+        <span>Click here or drop the .xlsx file</span>
+        <input type="file" id="fileInput" accept=".xlsx">
+      </label>
+      <p class="hint">The file is read in the browser and never uploaded anywhere. Your original file is
+        never modified: finished links come back as a separate download.</p>
+    </div>
+
+    <div id="fileLoaded" class="stack hidden">
+      <label class="field">Sheet
+        <select id="sheetSelect"></select>
+      </label>
+
+      <div class="mapping" id="mapping">
+        <div class="pairing"><span>Name</span><select id="mapName"></select></div>
+        <div class="pairing"><span>Code</span><select id="mapCode"></select></div>
+        <div class="pairing"><span>Price</span><select id="mapPrice"></select></div>
+        <div class="pairing"><span>Link</span><select id="mapLink"></select></div>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><b id="statTotal">0</b><span>Rows</span></div>
+        <div class="stat done"><b id="statDone">0</b><span>Done</span></div>
+        <div class="stat skipped"><b id="statSkipped">0</b><span>Skipped</span></div>
+        <div class="stat failed"><b id="statFailed">0</b><span>Failed</span></div>
+      </div>
+
+      <p class="hint" id="fileSummary"></p>
+    </div>
+  </section>
+
+  <!-- 2. Settings -->
+  <section class="card">
+    <h2><span class="num">2</span> Settings</h2>
+
+    <div class="grid-2">
+      <label class="field">Min delay (ms)
+        <input type="number" id="minDelay" min="0" max="60000" step="100">
+      </label>
+      <label class="field">Max delay (ms)
+        <input type="number" id="maxDelay" min="0" max="60000" step="100">
+      </label>
+      <label class="field">Step timeout (ms)
+        <input type="number" id="stepTimeout" min="5000" max="120000" step="1000">
+      </label>
+      <label class="field">Attempts per step
+        <input type="number" id="maxAttempts" min="1" max="5" step="1">
+      </label>
+    </div>
+
+    <p class="hint">Each click waits a random amount of time between the two delays, so the automation
+      never fires at a fixed machine rhythm.</p>
+
+    <label class="toggle" style="margin-top:12px">
+      <input type="checkbox" id="dryRun">
+      <span class="text">
+        <strong>Dry run</strong>
+        <small>Fills the product form for the first row and stops without saving. Nothing is created.
+          Use this to confirm the values are right before a real run.</small>
+      </span>
+    </label>
+  </section>
+
+  <!-- 3. Run -->
+  <section class="card">
+    <h2><span class="num">3</span> Run</h2>
+
+    <div class="row-of-buttons">
+      <button type="button" class="primary" id="btnStart">Start</button>
+      <button type="button" id="btnPause">Pause</button>
+      <button type="button" class="danger" id="btnStop">Stop</button>
+    </div>
+
+    <div class="progress"><i id="progressBar"></i></div>
+    <div class="progress-meta">
+      <span id="progressText">Nothing loaded yet</span>
+      <span id="etaText"></span>
+    </div>
+
+    <div class="current hidden" id="currentCard">
+      <div class="code" id="currentCode"></div>
+      <div class="title" id="currentName"></div>
+      <div class="steps" id="stepDots"></div>
+      <div class="step-name" id="stepName"></div>
+    </div>
+
+    <p class="hint" id="runHint">Open Fygaro and sign in first, then press Start.</p>
+    <div class="row-of-buttons" style="margin-top:8px">
+      <button type="button" class="subtle" id="btnOpenFygaro">Open Fygaro</button>
+    </div>
+  </section>
+
+  <!-- 4. Results -->
+  <section class="card">
+    <h2><span class="num">4</span> Results <span class="spacer"></span>
+      <button type="button" class="subtle" id="btnResetAll">Clear all</button>
+    </h2>
+
+    <div class="filters" id="filters">
+      <button type="button" class="chip" data-filter="all" aria-pressed="true">All</button>
+      <button type="button" class="chip" data-filter="done" aria-pressed="false">Done</button>
+      <button type="button" class="chip" data-filter="pending" aria-pressed="false">Pending</button>
+      <button type="button" class="chip" data-filter="skipped" aria-pressed="false">Skipped</button>
+      <button type="button" class="chip" data-filter="failed" aria-pressed="false">Failed</button>
+    </div>
+
+    <input type="text" id="search" placeholder="Search by code or name" aria-label="Search rows">
+    <div class="results" id="results" style="margin-top:8px"></div>
+    <p class="hint" id="resultsMeta"></p>
+  </section>
+
+  <!-- 5. Export -->
+  <section class="card">
+    <h2><span class="num">5</span> Export</h2>
+    <div class="row-of-buttons">
+      <button type="button" class="primary" id="btnExportXlsx">Download updated .xlsx</button>
+      <button type="button" id="btnExportCsv">Download CSV</button>
+      <button type="button" id="btnCopyLinks">Copy links</button>
+    </div>
+    <p class="hint" id="exportHint">Links are saved as soon as each one is created, so you can export at
+      any point without waiting for the whole run to finish.</p>
+  </section>
+
+  <!-- 6. Log -->
+  <section class="card">
+    <details class="log" id="logBox">
+      <summary>Activity log <span class="spacer"></span></summary>
+      <div class="log-lines" id="logLines"></div>
+      <div class="row-of-buttons" style="margin-top:8px">
+        <button type="button" class="subtle" id="btnCopyLog">Copy log</button>
+      </div>
+    </details>
+  </section>
+
+  <footer>
+    Built by <a href="https://www.abdullahawais.com" target="_blank" rel="noopener">Muhammad Abdullah Awais</a>
+  </footer>
+</div>
+
+<script src="../shared/util.js"></script>
+<script src="../shared/price.js"></script>
+<script src="../shared/state.js"></script>
+<script src="../shared/zip.js"></script>
+<script src="../shared/xlsx-read.js"></script>
+<script src="../shared/xlsx-write.js"></script>
+<script src="sidepanel.js"></script>
+</body>
+</html>

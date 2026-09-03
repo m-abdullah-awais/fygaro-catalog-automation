@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<!--
+  Fygaro Catalog Automation
+  Workbook reading tests. This half of the xlsx layer uses DOMParser, so it
+  cannot run under node and lives here instead. It reads the real catalog,
+  checks the parsed rows against the spreadsheet, patches column H and reads the
+  result back.
+
+  Headless:
+    chrome --headless=new --allow-file-access-from-files --dump-dom tests/xlsx.test.html
+
+  Opened by hand, file access is blocked, so a file picker appears instead.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Fygaro workbook tests</title>
+  <style>
+    :root { color-scheme: light; }
+    body { margin: 0; padding: 24px; background: #F6F7F9; color: #1A1F26;
+           font: 13px/1.5 -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+    h1 { font-size: 18px; margin: 0 0 4px; }
+    p.lead { margin: 0 0 20px; color: #5B6673; }
+    #summary { display: inline-block; padding: 8px 14px; border-radius: 6px; font-weight: 600; margin-bottom: 16px; }
+    #summary.pass { background: #E9F7EF; color: #17803D; border: 1px solid #17803D; }
+    #summary.fail { background: #FDECEC; color: #C02626; border: 1px solid #C02626; }
+    #summary.wait { background: #FFF; color: #5B6673; border: 1px solid #CBD2D9; }
+    ul { list-style: none; margin: 0; padding: 0; max-width: 900px; }
+    li { background: #fff; border: 1px solid #E3E6EA; border-radius: 6px; padding: 8px 12px; margin-bottom: 6px; }
+    li.bad { border-color: #C02626; background: #FDECEC; }
+    .tag { font-weight: 600; margin-right: 8px; }
+    li.ok .tag { color: #17803D; }
+    li.bad .tag { color: #C02626; }
+    .detail { color: #5B6673; font-family: ui-monospace, Consolas, monospace; font-size: 11px; }
+    #picker { margin-bottom: 16px; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <h1>Fygaro workbook tests</h1>
+  <p class="lead">Reads the real catalog, checks the parsed rows, then patches and re reads column H.</p>
+  <div id="picker" class="hidden">
+    <label>Pick <code>docs/Catálogo de Productos y Servicios Fygaro.xlsx</code>:
+      <input type="file" id="file" accept=".xlsx">
+    </label>
+  </div>
+  <div id="summary" class="wait">Loading...</div>
+  <ul id="results"></ul>
+
+  <script src="../src/shared/util.js"></script>
+  <script src="../src/shared/price.js"></script>
+  <script src="../src/shared/state.js"></script>
+  <script src="../src/shared/zip.js"></script>
+  <script src="../src/shared/xlsx-read.js"></script>
+  <script src="../src/shared/xlsx-write.js"></script>
+  <script src="xlsx.test.js"></script>
+</body>
+</html>
