@@ -123,12 +123,15 @@
    * form, once as a checkbox and once as a number input.
    */
   locate.requirementCheckbox = function (scope, name) {
-    return D.first('input[type="checkbox"][name="' + name + '"]', scope);
+    // D.control, not D.first: Fygaro hides the real input and paints a div in
+    // its place, so requiring visibility finds nothing on the live site.
+    return D.control('input[type="checkbox"][name="' + name + '"]', scope);
   };
 
   locate.saveButton = function (scope) {
     return D.firstByText('button[type="submit"]', ['Save', 'Guardar'], { scope: scope }) ||
-      D.first('button[type="submit"]', scope);
+      D.byText('button[type="submit"]', ['Save', 'Guardar'], { scope: scope })[0] ||
+      D.control('button[type="submit"]', scope);
   };
 
   locate.backHomeLink = function (scope) {
@@ -254,12 +257,12 @@
     var row = job.row;
     var settings = job.settings;
 
-    return D.waitForSelector('input[name="name"]', settings.stepTimeoutMs, 'the new item form')
+    return D.waitForControl('input[name="name"]', settings.stepTimeoutMs, 'the new item form')
       .then(function () { return pause(settings); })
       .then(function () {
-        var nameInput = D.first('input[name="name"]');
-        var codeInput = D.first('input[name="code"]');
-        var priceInput = D.first('input[name="price"]');
+        var nameInput = D.control('input[name="name"]');
+        var codeInput = D.control('input[name="code"]');
+        var priceInput = D.control('input[name="price"]');
 
         if (!nameInput) fail('The Name field was not found on the item form.');
         if (!codeInput) fail('The Code field was not found on the item form.');
@@ -322,7 +325,7 @@
   STEPS[S.STEP.CLICK_CREATE_LINK] = function (job) {
     var row = job.row;
 
-    return D.waitForSelector('input[name="name"]', job.settings.stepTimeoutMs, 'the product page')
+    return D.waitForControl('input[name="name"]', job.settings.stepTimeoutMs, 'the product page')
       .then(function () {
         if (row.productUuid) {
           var here = U.extractUuid(location.pathname);
@@ -331,8 +334,8 @@
           }
         }
 
-        var nameInput = D.first('input[name="name"]');
-        var codeInput = D.first('input[name="code"]');
+        var nameInput = D.control('input[name="name"]');
+        var codeInput = D.control('input[name="code"]');
 
         if (U.foldText(nameInput ? nameInput.value : '') !== U.foldText(row.name)) {
           fail('The open product is named "' + U.truncate(nameInput ? nameInput.value : '', 60) +
@@ -365,7 +368,7 @@
       { name: 'require_billing_address', label: 'Billing Address' }
     ];
 
-    return D.waitForSelector('input[name="name"]', settings.stepTimeoutMs, 'the new link form')
+    return D.waitForControl('input[name="name"]', settings.stepTimeoutMs, 'the new link form')
       .then(function () { return pause(settings); })
       .then(function () {
         // Fygaro attaches the product itself. Confirm it attached the right one.
@@ -373,7 +376,7 @@
           fail('The link form does not show product code ' + row.code + ', so the wrong product may be attached.');
         }
 
-        var nameInput = D.first('input[name="name"]');
+        var nameInput = D.control('input[name="name"]');
         if (!nameInput) fail('The Name field was not found on the link form.');
         if (!D.fillText(nameInput, row.code)) fail('The link Name field did not keep the value that was typed.');
 
@@ -382,7 +385,8 @@
       })
       .then(function () {
         // The toggle flips between Show and Hide, so decide from the panel
-        // itself rather than from the button label.
+        // itself rather than from the button label. Presence is the signal, not
+        // visibility: these inputs are hidden behind a painted replacement.
         if (locate.requirementCheckbox(null, 'require_phone')) return null;
 
         var toggle = locate.advancedOptionsToggle();
@@ -391,14 +395,27 @@
 
         return D.waitFor(function () { return locate.requirementCheckbox(null, 'require_phone'); },
           settings.stepTimeoutMs, 'the Advanced Options panel')
-          .catch(function () { fail('The Advanced Options panel did not open.'); });
+          .catch(function () {
+            // Name what is actually on the form, so a future change to it is
+            // obvious from the error rather than needing a live debug session.
+            var names = D.all('input[type="checkbox"]').map(function (el) { return el.name; })
+              .filter(Boolean);
+            fail('The Advanced Options panel did not open. The checkboxes on the form are: ' +
+              (names.length ? names.join(', ') : 'none') + '.');
+          });
       })
       .then(function () { return pause(settings); })
       .then(function () {
         for (var i = 0; i < REQUIRED.length; i++) {
           var box = locate.requirementCheckbox(null, REQUIRED[i].name);
-          if (!box) fail('The "' + REQUIRED[i].label + '" checkbox was not found in Advanced Options.');
-          if (!D.setChecked(box, true)) fail('The "' + REQUIRED[i].label + '" checkbox did not stay ticked.');
+          if (!box) {
+            fail('The "' + REQUIRED[i].label + '" checkbox (' + REQUIRED[i].name +
+              ') was not found in Advanced Options.');
+          }
+          if (!D.setChecked(box, true)) {
+            fail('The "' + REQUIRED[i].label + '" checkbox would not tick. It was clicked directly and ' +
+              'through its label, and stayed ' + (box.checked ? 'ticked' : 'unticked') + '.');
+          }
         }
         return pause(settings);
       })

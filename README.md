@@ -212,6 +212,11 @@ precisely because a popup closes the moment you click away.
   visible one is read back to confirm.
 - **A name collision is handled.** On the link form `max_successful_payments` is both a checkbox and a
   number input, so every input locator is qualified by type.
+- **Hidden form controls are still found.** Fygaro paints its own checkbox and hides the real `input`
+  behind it, so that input has no on screen box at all. Anything that reads or writes a form value
+  therefore accepts a control that is not painted, while still preferring the on screen copy when a
+  control is genuinely duplicated. Ticking is done by clicking the input, falling back to clicking its
+  label, which is what a user actually does.
 - **Advanced Options is not toggled blindly.** That button flips between Show and Hide. The extension
   checks whether the panel is already open instead of trusting the label.
 - **Dropdown values are read, not hard coded.** USD, Service and No are found by their visible label, with
@@ -271,7 +276,7 @@ npm run lint       # syntax, house rules, and manifest references
 | `tests/price.test.mjs` | 9 | Every one of the 699 real prices, cross checked against a separate reference implementation |
 | `tests/state.test.mjs` | 11 | Run state, routes, and that a run saved by an older version gains every setting added since |
 | `tests/xlsx.test.mjs` | 9 | ZIP round trips, style preservation, XML escaping, and that an unedited rewrite reproduces all 30 parts byte for byte |
-| `tests/selectors.test.html` | 32 | Every locator, run against the eight captured page snapshots |
+| `tests/selectors.test.html` | 38 | Every locator, run against the eight captured page snapshots, with Fygaro's checkbox styling reproduced |
 | `tests/xlsx.test.html` | 11 | Workbook reading, sheet and column detection, patch and re read |
 | `tests/integration.test.html` | 21 | The real side panel driving the real worker through a full run |
 
@@ -281,6 +286,11 @@ retried then escalated, a row skipped, pause and resume, a stalled navigation es
 declined without losing links, the page zoomed out before work begins and handed back on stop, zooming
 retried after a failure, a blank settings field keeping its default rather than inventing one, a dry run,
 and an export verified cell by cell against the original workbook.
+
+The locator suite deliberately applies Fygaro's own checkbox styling to the snapshots, hiding the real
+inputs behind painted replacements. Without that the snapshots render as plain visible checkboxes and a
+locator that wrongly demands visibility passes the test while finding nothing on the live site. If you add
+a snapshot, check whether the page styles that control before trusting a green run.
 
 The browser suites run headless via `tools/run-browser-tests.mjs`. Set `CHROME_PATH` if Chrome is somewhere
 unusual. The page snapshots come from `temp/html/` and are regenerated with `npm run fixtures`.
@@ -351,6 +361,10 @@ than guessing one.
 **The Fygaro page is left zoomed out.** The zoom is restored when a run stops or finishes. If the browser
 was closed mid run it can be left applied. Reset it with Ctrl and 0 on the Fygaro tab, or set Page zoom to
 100 and start and stop a run.
+
+**"The Advanced Options panel did not open."** The error now lists every checkbox actually on the form,
+so compare that against `require_phone`, `require_legal_id` and `require_billing_address`. If the names
+have changed, update `REQUIRED` in `src/content/steps.js`.
 
 **After a Fygaro redesign.** Run `npm run test:browser`. The locator suite reports exactly which lookup
 stopped matching.

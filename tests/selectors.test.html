@@ -29,6 +29,22 @@
     li.bad .tag { color: #C02626; }
     .detail { color: #5B6673; font-family: ui-monospace, Consolas, monospace; font-size: 11px; }
     #stage { position: absolute; left: -99999px; top: 0; width: 1200px; }
+
+    /*
+      Fygaro paints its own checkbox and hides the real input behind it. Without
+      this rule the snapshots render bare, visible checkboxes, and a locator that
+      wrongly demands visibility passes here while finding nothing on the live
+      site. That is exactly what happened, so the styling is reproduced.
+    */
+    #stage input[type="checkbox"] {
+      position: absolute;
+      opacity: 0;
+      width: 0;
+      height: 0;
+      margin: 0;
+      padding: 0;
+      border: 0;
+    }
   </style>
 </head>
 <body>
@@ -298,7 +314,7 @@
       var scope = mount('link_advance');
       var extras = ['allow_client_note', 'require_jwt', 'manual_capture', 'expires'];
       extras.forEach(function (name) {
-        var box = D.first('input[type="checkbox"][name="' + name + '"]', scope);
+        var box = D.control('input[type="checkbox"][name="' + name + '"]', scope);
         assert(box, name + ' should be present in this snapshot');
         assert(box.checked === false, name + ' must stay unticked');
       });
@@ -309,8 +325,8 @@
       var scope = mount('link_advance');
       var all = D.all('[name="max_successful_payments"]', scope);
       assert(all.length === 2, 'expected the name to appear twice, saw ' + all.length);
-      var box = D.first('input[type="checkbox"][name="max_successful_payments"]', scope);
-      var num = D.first('input[type="number"][name="max_successful_payments"]', scope);
+      var box = D.control('input[type="checkbox"][name="max_successful_payments"]', scope);
+      var num = D.control('input[type="number"][name="max_successful_payments"]', scope);
       assert(box && box.type === 'checkbox', 'the checkbox was not isolated');
       assert(num && num.type === 'number', 'the number input was not isolated');
       assert(box !== num, 'the two controls must be distinguishable');
@@ -384,6 +400,72 @@
       assert(D.setChecked(box, true), 'a second call should be a no op');
       assert(clicks === 1, 'a no op must not click again, saw ' + clicks);
       return 'ticked once, idempotent';
+    });
+
+    check('the requirement checkboxes are hidden by CSS, exactly as on the live site', function () {
+      var scope = mount('link_advance');
+      var box = locate.requirementCheckbox(scope, 'require_phone');
+      assert(box, 'the checkbox was not found');
+      assert(D.isVisible(box) === false,
+        'this test is only meaningful while the input is hidden, check the stage stylesheet');
+      assert(box.getClientRects().length === 0 || getComputedStyle(box).opacity === '0',
+        'the input should have no painted box of its own');
+      return 'hidden input, still located';
+    });
+
+    check('a locator that demanded visibility would have found nothing', function () {
+      // This is the bug that stopped a live run at "Fill the link form". It is
+      // kept as a test so the difference between the two helpers stays obvious.
+      var scope = mount('link_advance');
+      var demandsVisibility = D.first('input[type="checkbox"][name="require_phone"]', scope);
+      var tolerates = D.control('input[type="checkbox"][name="require_phone"]', scope);
+      assert(demandsVisibility === null, 'D.first should reject the hidden input');
+      assert(tolerates !== null, 'D.control must accept it');
+      return 'D.first finds nothing, D.control finds it';
+    });
+
+    check('a hidden checkbox can still be ticked, and only once', function () {
+      var scope = mount('link_advance');
+      ['require_phone', 'require_legal_id', 'require_billing_address'].forEach(function (name) {
+        var box = locate.requirementCheckbox(scope, name);
+        var clicks = 0;
+        box.addEventListener('click', function () { clicks++; });
+        assert(D.setChecked(box, true), name + ' would not tick');
+        assert(box.checked === true, name + ' is not checked');
+        assert(clicks === 1, name + ' took ' + clicks + ' clicks, expected 1');
+        assert(D.setChecked(box, true), name + ' second call should be a no op');
+        assert(clicks === 1, name + ' was clicked again on a no op');
+      });
+      return 'all three ticked with one click each';
+    });
+
+    check('a checkbox hidden with display none can still be ticked', function () {
+      var scope = mount('link_advance');
+      var box = locate.requirementCheckbox(scope, 'require_phone');
+      box.style.display = 'none';
+      assert(D.isVisible(box) === false, 'precondition: the input must be hidden');
+      assert(locate.requirementCheckbox(scope, 'require_phone') === box, 'it should still be located');
+      assert(D.setChecked(box, true), 'it would not tick');
+      assert(box.checked === true, 'it is not checked');
+      box.style.display = '';
+      return 'display:none is handled too';
+    });
+
+    check('the panel open check is based on presence, not on being painted', function () {
+      // Getting this wrong made the step click the toggle again and close the
+      // panel it was waiting for.
+      assert(locate.requirementCheckbox(mount('link_advance'), 'require_phone') !== null,
+        'an open panel must read as open');
+      assert(locate.requirementCheckbox(mount('link-add'), 'require_phone') === null,
+        'a collapsed panel must read as collapsed');
+      return 'open and collapsed are told apart correctly';
+    });
+
+    check('the Save button is still found while checkboxes are hidden', function () {
+      var save = locate.saveButton(mount('link_advance'));
+      assert(save, 'no Save button found');
+      assert(U.foldText(save.textContent) === 'save', 'wrong button: ' + U.textOf(save));
+      return D.describe(save);
     });
 
     check('accented and cased text still matches', function () {

@@ -44,6 +44,28 @@
   };
 
   /**
+   * Finds a form control, preferring one that is on screen but accepting one
+   * that is not.
+   *
+   * Fygaro styles its checkboxes by hiding the real input and painting a div
+   * beside it, so the element that has to be read and clicked has no boxes at
+   * all. Requiring visibility here silently found nothing on the live site even
+   * though the control was right there, so anything that reads or writes a form
+   * value must use this rather than D.first.
+   *
+   * D.all already sorts visible matches first, so a genuinely duplicated control
+   * still resolves to the copy the user can see.
+   */
+  D.control = function (selector, scope) {
+    return D.all(selector, scope)[0] || null;
+  };
+
+  /** Waits for a form control to exist, whether or not it is painted. */
+  D.waitForControl = function (selector, timeoutMs, label) {
+    return D.waitFor(function () { return D.control(selector); }, timeoutMs, label || selector);
+  };
+
+  /**
    * Finds elements by their visible text. Comparison folds case and accents so
    * the English and Spanish interfaces both resolve.
    * @param {string} selector
@@ -146,17 +168,39 @@
     return el.value === String(value);
   };
 
-  /** Ticks or unticks a checkbox through a real click, so React sees it. */
+  /**
+   * Ticks or unticks a checkbox through a real click, so React sees it.
+   *
+   * The input itself is tried first. If that does not take, the wrapping label
+   * is clicked instead, which is literally what a user does when the real input
+   * is hidden behind a painted replacement.
+   */
   D.setChecked = function (el, wanted) {
+    if (!el) return false;
     if (!!el.checked === !!wanted) return true;
+
+    D.reveal(el);
     el.click();
-    return !!el.checked === !!wanted;
+    if (!!el.checked === !!wanted) return true;
+
+    var label = el.closest ? el.closest('label') : null;
+    if (label) {
+      label.click();
+      if (!!el.checked === !!wanted) return true;
+    }
+    return false;
+  };
+
+  /** Scrolls a control into view, using its label when the control is hidden. */
+  D.reveal = function (el) {
+    var anchor = D.isVisible(el) ? el : ((el.closest && el.closest('label')) || el.parentElement || el);
+    try { anchor.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (e) { /* older engines */ }
   };
 
   /** Clicks an element the way a user reaches it. */
   D.click = function (el) {
     if (!el) return false;
-    try { el.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (e) { /* older engines */ }
+    D.reveal(el);
     if (typeof el.focus === 'function') { try { el.focus({ preventScroll: true }); } catch (e) { el.focus(); } }
     el.click();
     return true;
