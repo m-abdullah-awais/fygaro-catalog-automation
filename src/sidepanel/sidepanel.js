@@ -396,16 +396,23 @@
   }
 
   function renderSettings(run) {
-    if (document.activeElement && document.activeElement.closest('.card') === $('minDelay').closest('.card')) {
-      // Do not fight the user while they are typing in the settings card.
-      return;
-    }
-    $('minDelay').value = run.settings.minDelayMs;
-    $('maxDelay').value = run.settings.maxDelayMs;
-    $('stepTimeout').value = run.settings.stepTimeoutMs;
-    $('maxAttempts').value = run.settings.maxAttempts;
-    $('zoomPercent').value = run.settings.zoomPercent;
-    $('dryRun').checked = !!run.settings.dryRun;
+    // Only the field being typed into is left alone. Every other field is
+    // written back from the run, so what is on screen is always what will
+    // actually be used, including after a value was clamped or corrected.
+    var focused = document.activeElement;
+    var fields = [
+      ['minDelay', run.settings.minDelayMs],
+      ['maxDelay', run.settings.maxDelayMs],
+      ['stepTimeout', run.settings.stepTimeoutMs],
+      ['maxAttempts', run.settings.maxAttempts],
+      ['zoomPercent', run.settings.zoomPercent]
+    ];
+    fields.forEach(function (pair) {
+      var el = $(pair[0]);
+      if (el === focused) return;
+      if (String(el.value) !== String(pair[1])) el.value = pair[1];
+    });
+    if ($('dryRun') !== focused) $('dryRun').checked = !!run.settings.dryRun;
   }
 
   function matchesFilter(row, index, run) {
@@ -618,20 +625,42 @@
 
   /* ------------------------------------------------------------------ wiring */
 
+  /**
+   * Reads one numeric setting from its field.
+   *
+   * An empty or unreadable field falls back to the value the run is already
+   * using, and only then to the documented default. It never falls back to a
+   * literal written at the call site: doing that is what once let a blank zoom
+   * field save 100 percent, which is not the default and meant the page was
+   * told to zoom in rather than out.
+   */
+  function numberSetting(id, key, min, max) {
+    var raw = String($(id).value).trim();
+    var parsed = raw === '' ? NaN : parseInt(raw, 10);
+    if (!isFinite(parsed)) {
+      var current = view.run.settings[key];
+      parsed = isFinite(current) ? current : S.DEFAULT_SETTINGS[key];
+    }
+    return U.clamp(parsed, min, max);
+  }
+
   function pushSettings() {
-    var min = Math.max(0, parseInt($('minDelay').value, 10) || 0);
-    var max = Math.max(min, parseInt($('maxDelay').value, 10) || min);
-    if (parseInt($('maxDelay').value, 10) < min) $('maxDelay').value = max;
+    var min = numberSetting('minDelay', 'minDelayMs', 0, 60000);
+    var max = Math.max(min, numberSetting('maxDelay', 'maxDelayMs', 0, 60000));
 
     return send(S.MSG.UPDATE_SETTINGS, {
       settings: {
         minDelayMs: min,
         maxDelayMs: max,
-        stepTimeoutMs: U.clamp(parseInt($('stepTimeout').value, 10) || 20000, 5000, 120000),
-        maxAttempts: U.clamp(parseInt($('maxAttempts').value, 10) || 2, 1, 5),
-        zoomPercent: U.clamp(parseInt($('zoomPercent').value, 10) || 100, 25, 200),
+        stepTimeoutMs: numberSetting('stepTimeout', 'stepTimeoutMs', 5000, 120000),
+        maxAttempts: numberSetting('maxAttempts', 'maxAttempts', 1, 5),
+        zoomPercent: numberSetting('zoomPercent', 'zoomPercent', 25, 200),
         dryRun: $('dryRun').checked
       }
+    // Write the corrected values back to the fields, so what is on screen is
+    // always what the run will actually use.
+    }).then(function (result) {
+      return refresh().then(function () { return result; });
     });
   }
 

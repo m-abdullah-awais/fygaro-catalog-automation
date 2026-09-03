@@ -142,18 +142,26 @@ function applyZoom(run) {
   return attempt(5);
 }
 
-/** Applies the zoom and says so in the log, including when it could not be done. */
+/**
+ * Applies the zoom and always says what happened, including when nothing needed
+ * doing. Staying quiet on the no-change case once made a wrong zoom setting look
+ * exactly like a broken feature, so the log now names the number every time.
+ */
 function applyZoomAndReport(bucket) {
+  var wanted = bucket.run.settings.zoomPercent;
+
   return applyZoom(bucket.run).then(function (result) {
-    if (result.changed) {
-      log(bucket, 'info', 'Page zoom set to ' + Math.round(result.zoom * 100) +
-        '% so the side panel cannot change the layout. It is put back when the run ends.');
-      bucket.logDirty = true;
-    } else if (!result.ok) {
-      log(bucket, 'warn', 'The page zoom could not be set (' + result.reason +
+    bucket.logDirty = true;
+
+    if (!result.ok) {
+      log(bucket, 'warn', 'The page zoom could not be set to ' + wanted + '% (' + result.reason +
         '). The run will carry on, but if a step cannot find a field, zoom the Fygaro page out ' +
         'manually with Ctrl and minus.');
-      bucket.logDirty = true;
+    } else if (result.changed) {
+      log(bucket, 'info', 'Page zoom set to ' + Math.round(result.zoom * 100) +
+        '% so the side panel cannot change the layout. It is put back when the run ends.');
+    } else {
+      log(bucket, 'info', 'Page zoom is already ' + Math.round(result.zoom * 100) + '%, left as it is.');
     }
     return result;
   });

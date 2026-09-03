@@ -82,6 +82,45 @@ test('a run stored by an older version gains every new setting', async () => {
   assert.equal(run.cursor, 41);
 });
 
+test('a zoom of 100 saved by an older build is repaired, not honoured', async () => {
+  // Builds before the settings version existed could persist 100 because a blank
+  // field fell back to a literal. The user never chose it, and honouring it would
+  // zoom the page in rather than out.
+  store = {
+    [S.KEY_RUN]: {
+      settings: { minDelayMs: 900, maxDelayMs: 2000, stepTimeoutMs: 20000, maxAttempts: 2, zoomPercent: 100, dryRun: false }
+    }
+  };
+
+  const { run } = await S.read();
+  assert.equal(run.settings.zoomPercent, 67, 'the stray 100 should have been repaired');
+  assert.equal(run.settings.settingsVersion, S.SETTINGS_VERSION);
+  assert.equal(run.settings.minDelayMs, 900, 'unrelated settings must not be touched');
+});
+
+test('a zoom the user deliberately chose is kept once the settings are versioned', async () => {
+  store = {
+    [S.KEY_RUN]: {
+      settings: Object.assign({}, S.DEFAULT_SETTINGS, { zoomPercent: 100, settingsVersion: S.SETTINGS_VERSION })
+    }
+  };
+
+  const { run } = await S.read();
+  assert.equal(run.settings.zoomPercent, 100, 'a deliberate choice must be respected');
+});
+
+test('the repair runs once, then leaves the value alone', async () => {
+  store = { [S.KEY_RUN]: { settings: { zoomPercent: 100 } } };
+
+  const first = (await S.read()).run;
+  assert.equal(first.settings.zoomPercent, 67);
+
+  // Simulate the repaired settings being written back, then read again.
+  store[S.KEY_RUN] = { settings: Object.assign({}, first.settings, { zoomPercent: 120 }) };
+  const second = (await S.read()).run;
+  assert.equal(second.settings.zoomPercent, 120, 'a later choice must survive');
+});
+
 test('a zoom of 67 percent actually resolves to a real zoom factor', async () => {
   store = {};
   const { run } = await S.read();

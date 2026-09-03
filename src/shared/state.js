@@ -100,6 +100,14 @@
     link: ['Link', 'Enlace', 'URL']
   };
 
+  /*
+   * Bumped when a stored settings value needs correcting rather than merely
+   * defaulting. Builds before version 2 could persist a page zoom of 100 that
+   * the user never chose, because an empty field fell back to a literal instead
+   * of to the documented default.
+   */
+  S.SETTINGS_VERSION = 2;
+
   S.DEFAULT_SETTINGS = {
     minDelayMs: 1200,
     maxDelayMs: 3000,
@@ -177,7 +185,11 @@
     return chrome.storage.local.get([S.KEY_RUN, S.KEY_ROWS, S.KEY_LOG]).then(function (data) {
       var stored = data[S.KEY_RUN] || {};
       var run = Object.assign(S.defaultRun(), stored);
-      run.settings = Object.assign({}, S.DEFAULT_SETTINGS, stored.settings || {});
+      var storedSettings = stored.settings || {};
+      run.settings = S.migrateSettings(
+        Object.assign({}, S.DEFAULT_SETTINGS, storedSettings),
+        storedSettings.settingsVersion
+      );
       run.stats = Object.assign({ total: 0, toProcess: 0, done: 0, failed: 0, skipped: 0 }, stored.stats || {});
       return {
         run: run,
@@ -185,6 +197,23 @@
         log: data[S.KEY_LOG] || []
       };
     });
+  };
+
+  /**
+   * Repairs settings that an older build could have saved wrongly. Merging in
+   * defaults is not enough for those, because a wrong value is present rather
+   * than missing, so it would win the merge.
+   *
+   * The version is read from what was actually stored, never from the merged
+   * object. `settingsVersion` is deliberately absent from DEFAULT_SETTINGS: if
+   * it were there, every merge would look already migrated and nothing would
+   * ever be repaired.
+   */
+  S.migrateSettings = function (settings, storedVersion) {
+    if (storedVersion === S.SETTINGS_VERSION) return settings;
+    settings.zoomPercent = S.DEFAULT_SETTINGS.zoomPercent;
+    settings.settingsVersion = S.SETTINGS_VERSION;
+    return settings;
   };
 
   S.writeRun = function (run) {

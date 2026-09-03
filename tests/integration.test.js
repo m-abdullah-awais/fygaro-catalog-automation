@@ -276,6 +276,33 @@
     })
 
     .then(function () {
+      return check('a blank settings field never invents a value different from the default', function () {
+        // This is the bug that made the page zoom in instead of out: a blank
+        // field fell back to a literal 100, which is not the default of 67, and
+        // that wrong value was then saved.
+        return readState().then(function (before) {
+          assert(before.run.settings.zoomPercent === 67,
+            'precondition: the default zoom should be 67, it is ' + before.run.settings.zoomPercent);
+
+          $('zoomPercent').value = '';
+          $('zoomPercent').dispatchEvent(new Event('change'));
+          $('minDelay').value = '';
+          $('minDelay').dispatchEvent(new Event('change'));
+
+          return waitUntil(function () { return $('zoomPercent').value === '67'; },
+            'the blank field to be written back');
+        }).then(readState).then(function (after) {
+          assert(after.run.settings.zoomPercent === 67,
+            'a blank zoom field saved ' + after.run.settings.zoomPercent + ' instead of keeping 67');
+          assert(after.run.settings.minDelayMs === 1200,
+            'a blank min delay saved ' + after.run.settings.minDelayMs + ' instead of keeping 1200');
+          assert($('minDelay').value === '1200', 'the field should show the value that will be used');
+          return 'blank fields kept 67% and 1200ms, and the fields were corrected on screen';
+        });
+      });
+    })
+
+    .then(function () {
       return check('the row that already had a link is skipped, not redone', function () {
         return readState().then(function (data) {
           var row18 = data.rows.filter(function (r) { return r.sheetRow === 18; })[0];
