@@ -136,6 +136,7 @@ function completeRow(bucket, status, link) {
   run.stats = S.recount(bucket.rows);
   run.pending = null;
   run.attempt = 0;
+  run.waitingSince = null;
 
   var next = nextRowIndex(bucket.rows, run.cursor + 1);
   if (next === -1) {
@@ -226,6 +227,7 @@ handlers[S.MSG.START] = function (msg, bucket) {
     run.startedAt = Date.now();
     run.finishedAt = null;
     run.rowStartedAt = Date.now();
+    run.waitingSince = null;
     run.durations = [];
     bucket.rows[first].status = S.ROW.ACTIVE;
     bucket.rowsDirty = true;
@@ -257,6 +259,7 @@ handlers[S.MSG.RESUME] = function (msg, bucket) {
   bucket.run.status = S.STATUS.RUNNING;
   bucket.run.pending = null;
   bucket.run.attempt = 0;
+  bucket.run.waitingSince = null;
   log(bucket, 'info', 'Resumed.');
   bucket.logDirty = true;
   return Promise.resolve({ ok: true });
@@ -266,6 +269,7 @@ handlers[S.MSG.RETRY] = function (msg, bucket) {
   bucket.run.status = S.STATUS.RUNNING;
   bucket.run.pending = null;
   bucket.run.attempt = 0;
+  bucket.run.waitingSince = null;
   log(bucket, 'info', 'Retrying ' + (S.STEP_LABEL[bucket.run.step] || bucket.run.step) + '.');
   bucket.logDirty = true;
   return Promise.resolve({ ok: true });
@@ -348,9 +352,24 @@ handlers[S.MSG.REQUEST_JOB] = function (msg, bucket, sender) {
   if (msg.route !== wantRoute) {
     // The page is not where this step belongs. Say nothing and wait for the
     // navigation to land rather than acting on the wrong screen.
+    if (!run.waitingSince) run.waitingSince = Date.now();
+
+    // If it never lands, the run would sit here looking busy forever. Waiting
+    // far longer than a step could legitimately take means something moved the
+    // browser somewhere unexpected, so ask the user rather than hang.
+    var patience = Math.max(60000, (run.settings.stepTimeoutMs || 20000) * 3);
+    if (Date.now() - run.waitingSince > patience) {
+      run.waitingSince = null;
+      raiseAttention(bucket,
+        'The browser is on the ' + (msg.route || 'unrecognised') + ' page but step "' +
+        (S.STEP_LABEL[run.step] || run.step) + '" needs the ' + wantRoute + ' page. ' +
+        'Go back to that page and press Retry, or skip this row.', msg.url);
+      return Promise.resolve({ act: 'idle', hud: hud });
+    }
     return Promise.resolve({ act: 'wait', expect: wantRoute, step: run.step, hud: hud });
   }
 
+  run.waitingSince = null;
   return Promise.resolve({
     act: 'run',
     step: run.step,
@@ -376,6 +395,7 @@ handlers[S.MSG.STEP_DONE] = function (msg, bucket, sender) {
   if (!row) return Promise.resolve({ ok: true });
 
   run.attempt = 0;
+  run.waitingSince = null;
 
   if (msg.productUuid) {
     row.productUuid = msg.productUuid;
@@ -476,9 +496,15 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     return S.read().then(function (bucket) {
       bucket.rowsDirty = false;
       bucket.logDirty = false;
+      // The content script asks for work every couple of seconds for hours on
+      // end. Most of those answers change nothing, so compare before and after
+      // and skip the write and the redraw when the run is untouched.
+      var before = JSON.stringify(bucket.run);
       return Promise.resolve(handler(msg, bucket, sender)).then(function (result) {
         result = result || { ok: true };
         if (result.handled) return result;
+        var changed = bucket.rowsDirty || bucket.logDirty || JSON.stringify(bucket.run) !== before;
+        if (!changed) return result;
         return persist(bucket).then(function () { return result; });
       });
     });

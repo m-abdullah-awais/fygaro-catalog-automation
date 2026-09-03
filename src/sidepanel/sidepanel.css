@@ -409,7 +409,9 @@ input:focus, select:focus { border-color: var(--primary); }
 .result .who { min-width: 0; }
 .result .who b { display: block; font-family: var(--mono); font-weight: 600; overflow-wrap: anywhere; }
 .result .who small { display: block; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.result .badge { font-weight: 600; white-space: nowrap; }
+.result .badge { display: flex; align-items: center; gap: 6px; font-weight: 600; white-space: nowrap; }
+.result .badge .copy { padding: 3px 7px; font-size: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text-secondary); }
+.result .badge .copy:hover { background: var(--primary-tint); border-color: var(--primary); color: var(--primary); }
 .result.done .badge { color: var(--success); }
 .result.failed .badge { color: var(--danger); }
 .result.skipped .badge { color: var(--warning); }

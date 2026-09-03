@@ -424,6 +424,35 @@
     })
 
     .then(function () {
+      return check('a navigation that never lands is escalated instead of hanging forever', function () {
+        // The browser ends up somewhere the current step cannot act on. Waiting
+        // is right at first, but it must not wait for ever.
+        return askForJob('linkDone').then(function (job) {
+          assert(job.act === 'wait', 'the first wrong page should simply wait, got "' + job.act + '"');
+
+          var realNow = Date.now;
+          Date.now = function () { return realNow() + 200000; };
+          return askForJob('linkDone').then(function (later) {
+            Date.now = realNow;
+            assert(later.act === 'idle', 'expected the run to stop handing out work, got "' + later.act + '"');
+            return readState();
+          }, function (err) {
+            Date.now = realNow;
+            throw err;
+          });
+        }).then(function (data) {
+          assert(data.run.status === S.STATUS.ATTENTION, 'status is ' + data.run.status);
+          assert(/needs the .* page/.test(data.run.pending.message),
+            'unhelpful message: "' + data.run.pending.message + '"');
+          // Put the run back so the remaining checks continue from a clean state.
+          return chrome.runtime.sendMessage({ type: S.MSG.RESUME });
+        }).then(function () {
+          return 'waited, then asked the user rather than stalling silently';
+        });
+      });
+    })
+
+    .then(function () {
       return check('the exported workbook carries the captured links in the right rows', function () {
         return readState().then(function (data) {
           var done = data.rows.filter(function (r) { return r.status === S.ROW.DONE; });

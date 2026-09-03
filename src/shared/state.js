@@ -152,6 +152,7 @@
       startedAt: null,
       finishedAt: null,
       rowStartedAt: null,
+      waitingSince: null,
       durations: [],
       stats: { total: 0, toProcess: 0, done: 0, failed: 0, skipped: 0 }
     };

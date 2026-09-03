@@ -25,6 +25,9 @@
   var view = { run: S.defaultRun(), rows: [], log: [] };
   var filter = 'all';
   var searchTerm = '';
+  /* Set while the user is deliberately picking a different file, so a re-render
+   * triggered by the running job cannot snap the picker shut under them. */
+  var choosingFile = false;
 
   var $ = function (id) { return document.getElementById(id); };
 
@@ -199,6 +202,7 @@
   }
 
   function openWorkbook(file) {
+    choosingFile = false;
     $('fileSummary').textContent = 'Reading ' + file.name + '...';
     setHidden($('fileEmpty'), true);
     setHidden($('fileLoaded'), false);
@@ -216,6 +220,7 @@
         });
       })
       .catch(function (err) {
+        choosingFile = true;
         setHidden($('fileEmpty'), false);
         setHidden($('fileLoaded'), true);
         $('fileSummary').textContent = '';
@@ -257,6 +262,42 @@
     $('statDone').textContent = run.stats.done;
     $('statSkipped').textContent = run.stats.skipped;
     $('statFailed').textContent = run.stats.failed;
+  }
+
+  /**
+   * Decides which half of the catalog card to show. A run can outlive the cached
+   * workbook, so this is driven by the stored run rather than by whether the
+   * file happens to be in memory. Showing "Choose your catalog" over a run in
+   * progress would be alarming and wrong.
+   */
+  function renderCatalog(run, rows) {
+    if (choosingFile) return;
+    var loaded = !!(run.file || rows.length);
+    setHidden($('fileEmpty'), loaded);
+    setHidden($('fileLoaded'), !loaded);
+    setHidden($('btnChangeFile'), !loaded);
+    if (!loaded) return;
+
+    var file = run.file || {};
+
+    if (!workbook) {
+      // Without the file the sheet and column pickers cannot offer real
+      // choices, so show what the run is using and disable them.
+      var mapping = file.mapping || {};
+      optionList($('sheetSelect'), [{ value: file.sheetName || '', label: file.sheetName || 'Unknown sheet' }],
+        file.sheetName || '');
+      [['mapName', 'name'], ['mapCode', 'code'], ['mapPrice', 'price'], ['mapLink', 'link']]
+        .forEach(function (pair) {
+          var col = mapping[pair[1]] || '';
+          optionList($(pair[0]), [{ value: col, label: col || 'Not used' }], col);
+          $(pair[0]).disabled = true;
+        });
+      $('sheetSelect').disabled = true;
+      $('fileSummary').textContent = 'Using ' + (file.name || 'the catalog') +
+        '. Load the same file again to export an updated .xlsx.';
+    } else if (!$('fileSummary').textContent) {
+      $('fileSummary').textContent = 'Using ' + (file.name || fileName) + '.';
+    }
   }
 
   function renderProgress(run, rows) {
@@ -315,7 +356,9 @@
       $(id).disabled = running;
     });
     ['sheetSelect', 'mapName', 'mapCode', 'mapPrice', 'mapLink'].forEach(function (id) {
-      $(id).disabled = running;
+      // Without the workbook these hold a single placeholder option, so there is
+      // nothing to choose between.
+      $(id).disabled = running || !workbook;
     });
 
     var hint = 'Open Fygaro and sign in first, then press Start.';
@@ -395,22 +438,28 @@
       who.appendChild(code);
       who.appendChild(name);
 
+      // The status word is always shown, never colour alone, and the copy
+      // action sits beside it rather than replacing it.
       var badge = document.createElement('span');
       badge.className = 'badge';
+      var word = document.createElement('span');
+      word.textContent = BADGE[row.status] || row.status;
+      badge.appendChild(word);
+
       if (row.link) {
-        var link = document.createElement('button');
-        link.type = 'button';
-        link.className = 'subtle';
-        link.textContent = 'Copy link';
-        link.addEventListener('click', function () {
+        var copy = document.createElement('button');
+        copy.type = 'button';
+        copy.className = 'subtle copy';
+        copy.textContent = 'Copy';
+        copy.title = row.link;
+        copy.setAttribute('aria-label', 'Copy the link for ' + (row.code || 'this row'));
+        copy.addEventListener('click', function () {
           navigator.clipboard.writeText(row.link).then(function () {
-            link.textContent = 'Copied';
-            setTimeout(function () { link.textContent = 'Copy link'; }, 1200);
+            copy.textContent = 'Copied';
+            setTimeout(function () { copy.textContent = 'Copy'; }, 1200);
           });
         });
-        badge.appendChild(link);
-      } else {
-        badge.textContent = BADGE[row.status] || row.status;
+        badge.appendChild(copy);
       }
 
       item.appendChild(n);
@@ -466,6 +515,7 @@
   function render() {
     renderStatus(view.run);
     renderAttention(view.run);
+    renderCatalog(view.run, view.rows);
     renderStats(view.run);
     renderProgress(view.run, view.rows);
     renderControls(view.run, view.rows);
@@ -585,6 +635,7 @@
     });
 
     $('btnChangeFile').addEventListener('click', function () {
+      choosingFile = true;
       setHidden($('fileEmpty'), false);
       setHidden($('fileLoaded'), true);
       setHidden($('btnChangeFile'), true);
@@ -626,6 +677,7 @@
         fileName = '';
         sheetData = null;
         headerInfo = null;
+        choosingFile = false;
         setHidden($('fileEmpty'), false);
         setHidden($('fileLoaded'), true);
         setHidden($('btnChangeFile'), true);
