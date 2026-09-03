@@ -256,12 +256,13 @@ npm run lint       # syntax, house rules, and manifest references
 | `tests/xlsx.test.mjs` | 9 | ZIP round trips, style preservation, XML escaping, and that an unedited rewrite reproduces all 30 parts byte for byte |
 | `tests/selectors.test.html` | 32 | Every locator, run against the eight captured page snapshots |
 | `tests/xlsx.test.html` | 11 | Workbook reading, sheet and column detection, patch and re read |
-| `tests/integration.test.html` | 16 | The real side panel driving the real worker through a full run |
+| `tests/integration.test.html` | 17 | The real side panel driving the real worker through a full run |
 
 The integration suite is the interesting one. It stubs the Chrome APIs, loads the actual worker and the
 actual panel, then plays a run through: 699 rows loaded, all seven steps walked for several rows, a failure
-retried then escalated, a row skipped, pause and resume, a stalled navigation escalated, a dry run, and an
-export verified cell by cell against the original workbook.
+retried then escalated, a row skipped, pause and resume, a stalled navigation escalated, a reload prompt
+declined without losing links, a dry run, and an export verified cell by cell against the original
+workbook.
 
 The browser suites run headless via `tools/run-browser-tests.mjs`. Set `CHROME_PATH` if Chrome is somewhere
 unusual. The page snapshots come from `temp/html/` and are regenerated with `npm run fixtures`.

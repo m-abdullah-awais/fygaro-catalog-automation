@@ -424,6 +424,33 @@
     })
 
     .then(function () {
+      return check('declining the reload prompt keeps the captured links and the mapping', function () {
+        var realConfirm = window.confirm;
+        var asked = null;
+        window.confirm = function (text) { asked = text; return false; };
+
+        return readState().then(function (before) {
+          $('mapCode').value = 'B';
+          $('mapCode').dispatchEvent(new Event('change'));
+          return waitUntil(function () { return asked !== null; }, 'the confirmation prompt');
+        }).then(function () {
+          window.confirm = realConfirm;
+          assert(/clears the 2 links/.test(asked), 'the prompt did not name the cost: "' + asked + '"');
+          return readState();
+        }).then(function (after) {
+          assert(after.run.file.mapping.code === 'C', 'the stored mapping changed to ' + after.run.file.mapping.code);
+          assert(after.rows.filter(function (r) { return r.link; }).length === 3,
+            'links were lost, ' + after.rows.filter(function (r) { return r.link; }).length + ' remain');
+          assert($('mapCode').value === 'C', 'the dropdown still shows ' + $('mapCode').value);
+          return 'nothing reloaded, dropdown reverted to C';
+        }).catch(function (err) {
+          window.confirm = realConfirm;
+          throw err;
+        });
+      });
+    })
+
+    .then(function () {
       return check('a navigation that never lands is escalated instead of hanging forever', function () {
         // The browser ends up somewhere the current step cannot act on. Waiting
         // is right at first, but it must not wait for ever.

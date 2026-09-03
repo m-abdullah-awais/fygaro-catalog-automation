@@ -466,11 +466,17 @@ handlers[S.MSG.CONTENT_LOG] = function (msg, bucket) {
 
 /* ------------------------------------------------------------------- tabs */
 
+/*
+ * Prefers a tab already inside the Fygaro app. Falling back to any fygaro.com
+ * tab would be enough to find one, but that tab could be a payment link the user
+ * opened to look at, and it is about to be navigated away.
+ */
 function findOrOpenTab() {
-  return chrome.tabs.query({ url: S.ORIGIN + '/*' }).then(function (tabs) {
-    if (tabs && tabs.length) return tabs[0].id;
-    return chrome.tabs.create({ url: S.APP_URL, active: true }).then(function (tab) { return tab.id; });
-  });
+  return chrome.tabs.query({ url: [S.ORIGIN + '/en/app/*', S.ORIGIN + '/es/app/*'] })
+    .then(function (tabs) {
+      if (tabs && tabs.length) return tabs[0].id;
+      return chrome.tabs.create({ url: S.APP_URL, active: true }).then(function (tab) { return tab.id; });
+    });
 }
 
 chrome.tabs.onRemoved.addListener(function (tabId) {

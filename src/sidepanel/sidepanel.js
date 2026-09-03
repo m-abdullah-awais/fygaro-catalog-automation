@@ -163,6 +163,30 @@
     return { rows: rows, problems: problems };
   }
 
+  /**
+   * Reloading the catalog resets the run, which would throw away links that
+   * have already been captured. Ask before doing that, and never silently.
+   */
+  function confirmDiscardProgress(what) {
+    var captured = view.rows.filter(function (r) {
+      return r.link && r.status === S.ROW.DONE;
+    }).length;
+    if (!captured) return true;
+    return window.confirm(what + ' reloads the catalog and clears the ' + captured +
+      ' link' + (captured === 1 ? '' : 's') + ' captured so far.\n\n' +
+      'Export them first if you still need them. Continue?');
+  }
+
+  /** Puts the sheet and column dropdowns back to what the run is actually using. */
+  function restoreMappingSelects() {
+    var file = view.run.file;
+    if (!file) return;
+    if (file.sheetName) $('sheetSelect').value = file.sheetName;
+    var mapping = file.mapping || {};
+    [['mapName', 'name'], ['mapCode', 'code'], ['mapPrice', 'price'], ['mapLink', 'link']]
+      .forEach(function (pair) { $(pair[0]).value = mapping[pair[1]] || ''; });
+  }
+
   function applyMapping() {
     if (!sheetData || !headerInfo) return;
     var mapping = currentMapping();
@@ -614,7 +638,9 @@
     var fileInput = $('fileInput');
 
     fileInput.addEventListener('change', function () {
-      if (fileInput.files && fileInput.files[0]) openWorkbook(fileInput.files[0]);
+      if (!fileInput.files || !fileInput.files[0]) return;
+      if (!confirmDiscardProgress('Loading a different file')) { fileInput.value = ''; return; }
+      openWorkbook(fileInput.files[0]);
     });
 
     ['dragenter', 'dragover'].forEach(function (type) {
@@ -631,7 +657,9 @@
     });
     dropzone.addEventListener('drop', function (e) {
       var file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-      if (file) openWorkbook(file);
+      if (!file) return;
+      if (!confirmDiscardProgress('Loading a different file')) return;
+      openWorkbook(file);
     });
 
     $('btnChangeFile').addEventListener('click', function () {
@@ -642,9 +670,15 @@
       fileInput.value = '';
     });
 
-    $('sheetSelect').addEventListener('change', function () { loadSheet($('sheetSelect').value); });
+    $('sheetSelect').addEventListener('change', function () {
+      if (!confirmDiscardProgress('Changing the sheet')) return restoreMappingSelects();
+      loadSheet($('sheetSelect').value);
+    });
     ['mapName', 'mapCode', 'mapPrice', 'mapLink'].forEach(function (id) {
-      $(id).addEventListener('change', applyMapping);
+      $(id).addEventListener('change', function () {
+        if (!confirmDiscardProgress('Changing the column mapping')) return restoreMappingSelects();
+        applyMapping();
+      });
     });
 
     ['minDelay', 'maxDelay', 'stepTimeout', 'maxAttempts'].forEach(function (id) {
