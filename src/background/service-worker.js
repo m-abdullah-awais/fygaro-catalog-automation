@@ -108,17 +108,54 @@ function navigate(run, url) {
  * every navigation, and this run navigates constantly.
  */
 function applyZoom(run) {
-  if (run.tabId == null) return Promise.resolve(false);
-  var target = (run.settings.zoomPercent || 100) / 100;
+  if (run.tabId == null) return Promise.resolve({ ok: false, changed: false, reason: 'there is no Fygaro tab' });
 
-  return chrome.tabs.getZoom(run.tabId).then(function (current) {
-    // Only the first capture counts, so pausing and resuming cannot record the
-    // automation's own zoom as the value to restore later.
-    if (run.originalZoom == null) run.originalZoom = current;
-    if (Math.abs(current - target) < 0.001) return false;
-    return chrome.tabs.setZoom(run.tabId, target).then(function () { return true; });
-  }).catch(function () {
-    return false;
+  var target = (run.settings.zoomPercent || 100) / 100;
+  var CLOSE_ENOUGH = 0.005;
+
+  /*
+   * A tab that was only just created is still loading, and zooming it can fail
+   * until it settles, so this retries. It also reads the zoom back afterwards
+   * rather than assuming setZoom worked, because a silent no-op here would
+   * leave the run driving a layout the steps were not written for.
+   */
+  function attempt(triesLeft) {
+    return chrome.tabs.getZoom(run.tabId).then(function (current) {
+      // Only the first capture counts, so pausing and resuming cannot record
+      // the automation's own zoom as the value to restore later.
+      if (run.originalZoom == null) run.originalZoom = current;
+      if (Math.abs(current - target) < CLOSE_ENOUGH) {
+        return { ok: true, changed: false, zoom: current };
+      }
+      return chrome.tabs.setZoom(run.tabId, target)
+        .then(function () { return chrome.tabs.getZoom(run.tabId); })
+        .then(function (after) {
+          if (Math.abs(after - target) < CLOSE_ENOUGH) return { ok: true, changed: true, zoom: after };
+          throw new Error('the tab reported ' + Math.round(after * 100) + '% afterwards');
+        });
+    }).catch(function (err) {
+      if (triesLeft > 1) return U.sleep(400).then(function () { return attempt(triesLeft - 1); });
+      return { ok: false, changed: false, reason: String(err && err.message ? err.message : err) };
+    });
+  }
+
+  return attempt(5);
+}
+
+/** Applies the zoom and says so in the log, including when it could not be done. */
+function applyZoomAndReport(bucket) {
+  return applyZoom(bucket.run).then(function (result) {
+    if (result.changed) {
+      log(bucket, 'info', 'Page zoom set to ' + Math.round(result.zoom * 100) +
+        '% so the side panel cannot change the layout. It is put back when the run ends.');
+      bucket.logDirty = true;
+    } else if (!result.ok) {
+      log(bucket, 'warn', 'The page zoom could not be set (' + result.reason +
+        '). The run will carry on, but if a step cannot find a field, zoom the Fygaro page out ' +
+        'manually with Ctrl and minus.');
+      bucket.logDirty = true;
+    }
+    return result;
   });
 }
 
@@ -187,7 +224,9 @@ function completeRow(bucket, status, link) {
   run.rowStartedAt = Date.now();
   bucket.rows[next].status = S.ROW.ACTIVE;
   bucket.rowsDirty = true;
-  return Promise.resolve();
+  // Re-asserted once per row so a reset, a new tab or a stray Ctrl and zero
+  // cannot quietly put the run back onto the narrow layout.
+  return applyZoom(run).then(function () {});
 }
 
 /* ---------------------------------------------------------------- handlers */
@@ -276,11 +315,7 @@ handlers[S.MSG.START] = function (msg, bucket) {
 
     // Zoom first, then navigate, so the very first page already renders at the
     // layout the steps expect.
-    return applyZoom(run).then(function (changed) {
-      if (changed) {
-        log(bucket, 'info', 'Page zoom set to ' + (run.settings.zoomPercent || 100) +
-          '% so the side panel cannot change the layout. It is put back when the run ends.');
-      }
+    return applyZoomAndReport(bucket).then(function () {
       return navigate(run, S.APP_URL);
     });
   }).then(function () {
@@ -307,7 +342,7 @@ handlers[S.MSG.RESUME] = function (msg, bucket) {
   bucket.run.waitingSince = null;
   log(bucket, 'info', 'Resumed.');
   bucket.logDirty = true;
-  return applyZoom(bucket.run).then(function () { return { ok: true }; });
+  return applyZoomAndReport(bucket).then(function () { return { ok: true }; });
 };
 
 handlers[S.MSG.RETRY] = function (msg, bucket) {

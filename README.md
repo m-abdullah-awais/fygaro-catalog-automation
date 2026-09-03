@@ -142,6 +142,10 @@ for. This is real browser zoom, the same thing Ctrl and minus does, because only
 layout viewport that the breakpoints respond to. Whatever zoom the page had before the run is remembered
 and restored when the run stops or finishes. Set it to 100 to leave the page alone.
 
+It is applied when you press Start, before the run navigates anywhere, and re-applied at the start of every
+row so it cannot drift. The Activity log records it either way, including the reason if it could not be
+applied.
+
 ---
 
 ## When something goes wrong
@@ -265,16 +269,17 @@ npm run lint       # syntax, house rules, and manifest references
 | Suite | Checks | Covers |
 |-------|--------|--------|
 | `tests/price.test.mjs` | 9 | Every one of the 699 real prices, cross checked against a separate reference implementation |
+| `tests/state.test.mjs` | 8 | Run state, routes, and that a run saved by an older version gains every setting added since |
 | `tests/xlsx.test.mjs` | 9 | ZIP round trips, style preservation, XML escaping, and that an unedited rewrite reproduces all 30 parts byte for byte |
 | `tests/selectors.test.html` | 32 | Every locator, run against the eight captured page snapshots |
 | `tests/xlsx.test.html` | 11 | Workbook reading, sheet and column detection, patch and re read |
-| `tests/integration.test.html` | 19 | The real side panel driving the real worker through a full run |
+| `tests/integration.test.html` | 20 | The real side panel driving the real worker through a full run |
 
 The integration suite is the interesting one. It stubs the Chrome APIs, loads the actual worker and the
 actual panel, then plays a run through: 699 rows loaded, all seven steps walked for several rows, a failure
 retried then escalated, a row skipped, pause and resume, a stalled navigation escalated, a reload prompt
-declined without losing links, the page zoomed out before work begins and handed back on stop, a dry run,
-and an export verified cell by cell against the original workbook.
+declined without losing links, the page zoomed out before work begins and handed back on stop, zooming
+retried after a failure, a dry run, and an export verified cell by cell against the original workbook.
 
 The browser suites run headless via `tools/run-browser-tests.mjs`. Set `CHROME_PATH` if Chrome is somewhere
 unusual. The page snapshots come from `temp/html/` and are regenerated with `npm run fixtures`.
@@ -335,6 +340,10 @@ Download CSV, which needs no file.
 your original file, so you are always replacing it yourself.
 
 **A run seems stuck.** Raise Step timeout in Settings if Fygaro is responding slowly, then Retry.
+
+**The page is not zooming.** The zoom is applied when you press **Start**, not when the panel opens, and
+the Activity log says so: look for `Page zoom set to 67%`. If it could not be applied the log says that
+too, with the reason. Check Page zoom in Settings is not 100.
 
 **The Fygaro page is left zoomed out.** The zoom is restored when a run stops or finishes. If the browser
 was closed mid run it can be left applied. Reset it with Ctrl and 0 on the Fygaro tab, or set Page zoom to

@@ -20,6 +20,7 @@
   var results = [];
   var recorded = { badges: [], notifications: [], tabUpdates: [], downloads: [], actions: [] };
   var currentZoom = 1;
+  var zoomFailuresLeft = 0;
 
   function assert(condition, message) {
     if (!condition) throw new Error(message);
@@ -135,6 +136,11 @@
       },
       getZoom: function () { return Promise.resolve(currentZoom); },
       setZoom: function (id, factor) {
+        // Lets a test make zooming fail the way a still loading tab does.
+        if (zoomFailuresLeft > 0) {
+          zoomFailuresLeft--;
+          return Promise.reject(new Error('Cannot zoom the tab while it is loading'));
+        }
         currentZoom = factor;
         recorded.actions.push('zoom:' + factor);
         return Promise.resolve();
@@ -314,6 +320,38 @@
           assert(data.run.originalZoom === 1, 'the original zoom was recorded as ' + data.run.originalZoom);
           return 'zoomed to 67%, then reloaded at that zoom, original 100% remembered';
         });
+      });
+    })
+
+    .then(function () {
+      return check('zooming retries when the tab is not ready, and recovers drift', function () {
+        $('btnPause').click();
+        return waitUntil(function () { return $('statusPill').dataset.status === 'paused'; }, 'the pause')
+          .then(function () {
+            return readState();
+          })
+          .then(function (before) {
+            var logLines = before.log.length;
+            // The page drifts back to 100%, as if the user pressed Ctrl and zero,
+            // and the first two attempts to correct it fail.
+            currentZoom = 1;
+            zoomFailuresLeft = 2;
+
+            $('btnStart').click();
+            return waitUntil(function () { return Math.abs(currentZoom - 0.67) < 0.001; },
+              'the zoom to be re-applied after two failures', 15000)
+              .then(function () { return readState(); })
+              .then(function (after) {
+                assert(zoomFailuresLeft === 0, 'the failures were not all consumed');
+                assert(after.run.originalZoom === 1,
+                  'the original zoom must not be overwritten on resume, it is ' + after.run.originalZoom);
+                var warned = after.log.slice(logLines).filter(function (e) {
+                  return e.level === 'warn' && /zoom could not be set/.test(e.message);
+                });
+                assert(warned.length === 0, 'a recovered retry must not warn the user');
+                return 'failed twice, then set 67% on the third try';
+              });
+          });
       });
     })
 

@@ -7,8 +7,8 @@
   "license": "UNLICENSED",
   "type": "module",
   "scripts": {
-    "test": "node --test tests/price.test.mjs tests/xlsx.test.mjs && node tools/run-browser-tests.mjs",
-    "test:node": "node --test tests/price.test.mjs tests/xlsx.test.mjs",
+    "test": "node --test tests/price.test.mjs tests/state.test.mjs tests/xlsx.test.mjs && node tools/run-browser-tests.mjs",
+    "test:node": "node --test tests/price.test.mjs tests/state.test.mjs tests/xlsx.test.mjs",
     "test:browser": "node tools/run-browser-tests.mjs",
     "lint": "node tools/check-syntax.mjs",
     "fixtures": "python tools/build-fixtures.py"

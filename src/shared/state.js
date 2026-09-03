@@ -165,11 +165,22 @@
     };
   };
 
-  /** Reads the whole run, filling in defaults for anything not stored yet. */
+  /**
+   * Reads the whole run, filling in defaults for anything not stored yet.
+   *
+   * Settings are merged one level deeper than the rest. A plain Object.assign
+   * would let a settings object saved by an older version replace the defaults
+   * wholesale, so any setting added later would silently arrive as undefined for
+   * anyone who had already used the extension.
+   */
   S.read = function () {
     return chrome.storage.local.get([S.KEY_RUN, S.KEY_ROWS, S.KEY_LOG]).then(function (data) {
+      var stored = data[S.KEY_RUN] || {};
+      var run = Object.assign(S.defaultRun(), stored);
+      run.settings = Object.assign({}, S.DEFAULT_SETTINGS, stored.settings || {});
+      run.stats = Object.assign({ total: 0, toProcess: 0, done: 0, failed: 0, skipped: 0 }, stored.stats || {});
       return {
-        run: Object.assign(S.defaultRun(), data[S.KEY_RUN] || {}),
+        run: run,
         rows: data[S.KEY_ROWS] || [],
         log: data[S.KEY_LOG] || []
       };
