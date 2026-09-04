@@ -236,6 +236,10 @@ button.primary:hover:not(:disabled) { background: var(--primary-hover); border-c
 button.danger { color: var(--danger); border-color: var(--border-strong); }
 button.danger:hover:not(:disabled) { background: var(--danger-tint); border-color: var(--danger); }
 
+/* Reserved for the one action that destroys stored work, so it reads as final. */
+button.danger.solid { background: var(--danger); border-color: var(--danger); color: #fff; }
+button.danger.solid:hover:not(:disabled) { background: #A11F1F; border-color: #A11F1F; color: #fff; }
+
 button.subtle { border-color: transparent; background: transparent; color: var(--text-secondary); padding: 6px 8px; font-weight: 500; }
 button.subtle:hover:not(:disabled) { background: var(--surface-sunken); color: var(--text); }
 
@@ -284,6 +288,11 @@ input:focus, select:focus { border-color: var(--primary); }
 .dropzone strong { font-size: var(--fs-md); }
 .dropzone span { font-size: var(--fs-xs); color: var(--text-secondary); }
 .dropzone input[type="file"] { display: none; }
+
+/* Where the links get written. */
+.destination { display: grid; gap: var(--sp-2); }
+.destination .toggle input { accent-color: var(--primary); }
+.destination .toggle:has(input:disabled) { opacity: .5; cursor: not-allowed; }
 
 /* Column mapping */
 .mapping { display: grid; gap: var(--sp-2); }

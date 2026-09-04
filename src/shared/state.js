@@ -238,6 +238,15 @@
     return chrome.storage.local.remove([S.KEY_RUN, S.KEY_ROWS, S.KEY_LOG, S.KEY_FILE]);
   };
 
+  /*
+   * Wipes the extension's storage outright rather than removing the four keys
+   * it currently uses, so a key left behind by an older version cannot survive
+   * a clear and quietly come back.
+   */
+  S.clearAll = function () {
+    return chrome.storage.local.clear();
+  };
+
   /** Recomputes the counters shown in the side panel. */
   S.recount = function (rows) {
     var stats = { total: rows.length, toProcess: 0, done: 0, failed: 0, skipped: 0 };

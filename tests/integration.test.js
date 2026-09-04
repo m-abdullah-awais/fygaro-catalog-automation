@@ -18,9 +18,21 @@
   var SHEET = 'Logros ';
 
   var results = [];
-  var recorded = { badges: [], notifications: [], tabUpdates: [], downloads: [], actions: [] };
+  var recorded = { badges: [], notifications: [], tabUpdates: [], downloads: [], actions: [],
+                   alerts: [], confirms: [] };
   var currentZoom = 1;
   var zoomFailuresLeft = 0;
+
+  /* Stands in for a real FileSystemFileHandle, so the in place save path is
+   * exercised rather than mocked away. */
+  var savedToDisk = null;
+  var handlePermission = 'granted';
+  var fakeHandle = null;
+
+  // Dialogs are recorded instead of shown. A modal would stall headless Chrome.
+  var confirmAnswer = true;
+  window.alert = function (text) { recorded.alerts.push(String(text)); };
+  window.confirm = function (text) { recorded.confirms.push(String(text)); return confirmAnswer; };
 
   function assert(condition, message) {
     if (!condition) throw new Error(message);
@@ -106,6 +118,15 @@
           var list = typeof keys === 'string' ? [keys] : keys;
           var changes = {};
           list.forEach(function (k) { changes[k] = { oldValue: clone(store[k]) }; delete store[k]; });
+          storageListeners.forEach(function (fn) { fn(changes, 'local'); });
+          return Promise.resolve();
+        },
+        clear: function () {
+          var changes = {};
+          Object.keys(store).forEach(function (k) {
+            changes[k] = { oldValue: clone(store[k]) };
+            delete store[k];
+          });
           storageListeners.forEach(function (fn) { fn(changes, 'local'); });
           return Promise.resolve();
         }
@@ -243,23 +264,22 @@
 
   function suite() {
     return check('the panel markup and script load without errors', function () {
-      return waitUntil(function () { return $('statusPill'); }, 'the panel to mount')
+      return waitUntil(function () { return $('statusPill') && $('btnStart').disabled; },
+        'the panel to mount and render')
         .then(function () {
           assert($('statusPill').textContent === 'Idle', 'starts as "' + $('statusPill').textContent + '"');
-          assert($('btnStart').disabled, 'Start should be disabled before a catalog is loaded');
           assert($('btnExportXlsx').disabled, 'Export should be disabled before any link exists');
-          return 'panel mounted, controls correctly disabled';
+          assert($('targetCopy').checked, 'saving into a copy should be the default');
+          assert($('targetOriginal').disabled, 'updating the original needs a file handle');
+          return 'panel mounted, controls disabled, copy is the default target';
         });
     })
 
     .then(function () {
       return check('choosing the catalog file loads all 699 rows', function () {
-        var file = new File([workbookBytes], WORKBOOK_NAME,
-          { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-        var transfer = new DataTransfer();
-        transfer.items.add(file);
-        $('fileInput').files = transfer.files;
-        $('fileInput').dispatchEvent(new Event('change'));
+        // Goes through the file picker, which is what hands over a handle the
+        // extension can later write back to.
+        $('dropzone').click();
 
         return waitUntil(function () { return $('statTotal').textContent === '699'; }, 'the rows to load', 20000)
           .then(function () {
@@ -270,7 +290,9 @@
             assert($('mapLink').value === 'H', 'Link mapped to ' + $('mapLink').value);
             assert($('statSkipped').textContent === '1', 'expected 1 pre-skipped row, saw ' + $('statSkipped').textContent);
             assert(!$('btnStart').disabled, 'Start should now be enabled');
-            return '699 rows, sheet and columns detected automatically';
+            assert(!$('targetOriginal').disabled,
+              'picking the file should make updating the original possible');
+            return '699 rows, columns detected, and the original file is writable';
           });
       });
     })
@@ -636,6 +658,85 @@
     })
 
     .then(function () {
+      return check('updating the original writes to the file itself, with no download', function () {
+        savedToDisk = null;
+        recorded.downloads.length = 0;
+        handlePermission = 'granted';
+        confirmAnswer = true;
+
+        $('targetOriginal').checked = true;
+        $('targetOriginal').dispatchEvent(new Event('change'));
+        assert($('btnExportXlsx').textContent === 'Update the original file',
+          'the button should say what it will do, it says "' + $('btnExportXlsx').textContent + '"');
+
+        return readState().then(function (data) {
+          var done = data.rows.filter(function (r) { return r.status === S.ROW.DONE; });
+          $('btnExportXlsx').click();
+
+          return waitUntil(function () { return savedToDisk; }, 'the file to be written', 20000)
+            .then(function () {
+              assert(recorded.downloads.length === 0,
+                'updating the original must not also download a copy');
+              var asked = recorded.confirms[recorded.confirms.length - 1];
+              assert(/replaces the file on your disk/.test(asked),
+                'the confirmation should be explicit, it said: ' + asked);
+              return savedToDisk.arrayBuffer();
+            })
+            .then(function (buffer) { return X.load(new Uint8Array(buffer)); })
+            .then(function (wb) {
+              var byRow = {};
+              wb.readSheet(SHEET).rows.forEach(function (r) { byRow[r.r] = r.cells; });
+              done.forEach(function (row) {
+                assert(byRow[row.sheetRow].H === row.link,
+                  'sheet row ' + row.sheetRow + ' was written as "' + byRow[row.sheetRow].H + '"');
+              });
+              assert(wb.sheets.length === 6, 'the other sheets were lost');
+              assert(byRow[2].D === 'Cita de Ingreso Presencial con Psicóloga Clínica del Equipo',
+                'row 2 was damaged');
+              return done.length + ' links written into the file on disk, nothing downloaded';
+            });
+        });
+      });
+    })
+
+    .then(function () {
+      return check('a refused permission fails loudly and writes nothing', function () {
+        savedToDisk = null;
+        handlePermission = 'denied';
+        recorded.alerts.length = 0;
+
+        $('btnExportXlsx').click();
+        return waitUntil(function () { return recorded.alerts.length > 0; }, 'the failure to be reported')
+          .then(function () {
+            assert(savedToDisk === null, 'nothing may be written without permission');
+            var said = recorded.alerts[recorded.alerts.length - 1];
+            assert(/could not be updated/.test(said), 'unhelpful message: ' + said);
+            assert(/Excel/.test(said), 'the message should mention closing the file in Excel');
+            handlePermission = 'granted';
+            return 'refused cleanly, the file was left alone';
+          });
+      });
+    })
+
+    .then(function () {
+      return check('saving into a copy still downloads and leaves the file alone', function () {
+        savedToDisk = null;
+        recorded.downloads.length = 0;
+        $('targetCopy').checked = true;
+        $('targetCopy').dispatchEvent(new Event('change'));
+        assert($('btnExportXlsx').textContent === 'Download updated .xlsx',
+          'the button should change back, it says "' + $('btnExportXlsx').textContent + '"');
+
+        $('btnExportXlsx').click();
+        return waitUntil(function () { return recorded.downloads.length > 0; }, 'the copy to download', 20000)
+          .then(function () {
+            assert(savedToDisk === null, 'saving into a copy must never touch the original');
+            return 'downloaded a copy, original untouched';
+          });
+      });
+    })
+
+    .then(function () {
       return check('a dry run stops with the form filled and creates nothing', function () {
         $('btnStop').click();
         return waitUntil(function () { return $('statusPill').dataset.status === 'idle'; }, 'the stop')
@@ -678,15 +779,45 @@
     })
 
     .then(function () {
-      return check('Clear all wipes the run, the rows, the log and the cached file', function () {
-        return chrome.runtime.sendMessage({ type: S.MSG.RESET }).then(function () {
-          return waitUntil(function () { return !(S.KEY_ROWS in store); }, 'the reset');
-        }).then(function () {
-          assert(!(S.KEY_RUN in store), 'the run was left behind');
-          assert(!(S.KEY_LOG in store), 'the log was left behind');
-          assert(!(S.KEY_FILE in store), 'the cached workbook was left behind');
-          return 'all four storage keys cleared';
-        });
+      return check('Clear everything empties storage and resets the whole panel', function () {
+        // Leave some interface state behind, so the reset has something to undo.
+        $('search').value = 'CT-ING';
+        $('search').dispatchEvent(new Event('input'));
+        $('filters').querySelector('[data-filter="done"]').click();
+        store.fyg_legacy_key = { left: 'behind by an older version' };
+        confirmAnswer = true;
+        recorded.confirms.length = 0;
+
+        $('btnResetAll').click();
+
+        return waitUntil(function () { return Object.keys(store).length === 0; }, 'storage to empty')
+          .then(function () {
+            var asked = recorded.confirms[recorded.confirms.length - 1];
+            assert(/Clear everything/.test(asked), 'the prompt should say what it does: ' + asked);
+            assert(/captured link/.test(asked), 'the prompt should name the cost: ' + asked);
+
+            assert(!(S.KEY_RUN in store), 'the run was left behind');
+            assert(!(S.KEY_ROWS in store), 'the rows were left behind');
+            assert(!(S.KEY_LOG in store), 'the log was left behind');
+            assert(!(S.KEY_FILE in store), 'the cached workbook was left behind');
+            assert(!('fyg_legacy_key' in store), 'a key from an older version survived');
+
+            return waitUntil(function () { return $('statTotal').textContent === '0'; }, 'the panel to reset');
+          })
+          .then(function () {
+            assert($('search').value === '', 'the search box was not cleared');
+            assert($('filters').querySelector('[data-filter="all"]').getAttribute('aria-pressed') === 'true',
+              'the filter was not put back to All');
+            assert($('targetCopy').checked, 'the save target was not put back to a copy');
+            assert($('targetOriginal').disabled, 'the file handle was not forgotten');
+            assert($('fileEmpty').classList.contains('hidden') === false, 'the file picker is not shown again');
+            assert($('fileLoaded').classList.contains('hidden'), 'the loaded file panel is still showing');
+            assert($('resetSummary').textContent === 'Nothing is stored yet.',
+              'the summary still reads "' + $('resetSummary').textContent + '"');
+            assert($('btnStart').disabled, 'Start should be disabled again');
+            assert($('sheetSelect').options.length === 0, 'the sheet list was not cleared');
+            return 'storage empty, panel back to its first run state';
+          });
       });
     })
 
@@ -695,14 +826,14 @@
 
   function report() {
     var failed = results.filter(function (r) { return !r.ok; });
-    var summary = document.getElementById('summary');
+    var summary = document.getElementById('reportSummary');
     summary.className = failed.length ? 'fail' : 'pass';
     summary.textContent = failed.length
       ? failed.length + ' of ' + results.length + ' checks FAILED'
       : 'All ' + results.length + ' checks passed';
     document.title = (failed.length ? 'FAIL ' + failed.length + '/' : 'PASS 0/') + results.length;
 
-    var list = document.getElementById('results');
+    var list = document.getElementById('reportResults');
     list.innerHTML = '';
     results.forEach(function (r) {
       var li = document.createElement('li');
@@ -731,6 +862,28 @@
     })
     .then(function (buffer) {
       workbookBytes = buffer;
+
+      fakeHandle = {
+        kind: 'file',
+        name: WORKBOOK_NAME,
+        queryPermission: function () { return Promise.resolve(handlePermission); },
+        requestPermission: function () { return Promise.resolve(handlePermission); },
+        getFile: function () {
+          return Promise.resolve(new File([workbookBytes], WORKBOOK_NAME,
+            { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+        },
+        createWritable: function () {
+          if (handlePermission !== 'granted') return Promise.reject(new Error('not allowed'));
+          var chunks = [];
+          return Promise.resolve({
+            write: function (blob) { chunks.push(blob); return Promise.resolve(); },
+            // Only a close that is reached commits, mirroring the real API.
+            close: function () { savedToDisk = new Blob(chunks); return Promise.resolve(); }
+          });
+        }
+      };
+      window.showOpenFilePicker = function () { return Promise.resolve([fakeHandle]); };
+
       return mountPanelMarkup();
     })
     // The worker registers its message listener first, exactly as in the browser.

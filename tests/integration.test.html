@@ -19,10 +19,10 @@
   <style>
     body { padding: 24px; }
     #report { max-width: 900px; margin-bottom: 24px; }
-    #summary { display: inline-block; padding: 8px 14px; border-radius: 6px; font-weight: 600; margin-bottom: 16px; }
-    #summary.pass { background: #E9F7EF; color: #17803D; border: 1px solid #17803D; }
-    #summary.fail { background: #FDECEC; color: #C02626; border: 1px solid #C02626; }
-    #summary.wait { background: #FFF; color: #5B6673; border: 1px solid #CBD2D9; }
+    #reportSummary { display: inline-block; padding: 8px 14px; border-radius: 6px; font-weight: 600; margin-bottom: 16px; }
+    #reportSummary.pass { background: #E9F7EF; color: #17803D; border: 1px solid #17803D; }
+    #reportSummary.fail { background: #FDECEC; color: #C02626; border: 1px solid #C02626; }
+    #reportSummary.wait { background: #FFF; color: #5B6673; border: 1px solid #CBD2D9; }
     #report ul { list-style: none; margin: 0; padding: 0; }
     #report li { background: #fff; border: 1px solid #E3E6EA; border-radius: 6px; padding: 8px 12px; margin-bottom: 6px; font-size: 13px; }
     #report li.bad { border-color: #C02626; background: #FDECEC; }
@@ -38,8 +38,8 @@
     <h1 style="font-size:18px;margin:0 0 4px">Fygaro integration tests</h1>
     <p style="margin:0 0 20px;color:#5B6673">The real side panel and the real background worker, wired together
       over stubbed Chrome APIs and driven through a full run.</p>
-    <div id="summary" class="wait">Running...</div>
-    <ul id="results"></ul>
+    <div id="reportSummary" class="wait">Running...</div>
+    <ul id="reportResults"></ul>
   </div>
 
   <h2 style="font-size:13px;color:#5B6673;text-transform:uppercase;letter-spacing:.04em">Live panel</h2>

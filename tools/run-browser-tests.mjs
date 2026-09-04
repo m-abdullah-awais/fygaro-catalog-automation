@@ -48,7 +48,9 @@ for (const page of PAGES) {
       '--no-sandbox',
       // The workbook test reads the catalog straight off disk.
       '--allow-file-access-from-files',
-      '--virtual-time-budget=20000',
+      // Virtual time also advances Date.now(), so this has to cover every wait
+      // the suites perform, not just their real elapsed time.
+      '--virtual-time-budget=90000',
       '--dump-dom',
       url
     ], {

@@ -35,13 +35,14 @@
     </h2>
 
     <div id="fileEmpty">
-      <label class="dropzone" id="dropzone">
+      <div class="dropzone" id="dropzone" role="button" tabindex="0"
+           aria-label="Choose your catalog file, or drop it here">
         <strong>Choose your catalog</strong>
         <span>Click here or drop the .xlsx file</span>
-        <input type="file" id="fileInput" accept=".xlsx">
-      </label>
-      <p class="hint">The file is read in the browser and never uploaded anywhere. Your original file is
-        never modified: finished links come back as a separate download.</p>
+        <input type="file" id="fileInput" accept=".xlsx" hidden>
+      </div>
+      <p class="hint">The file is read in the browser and never uploaded anywhere. When the run finishes
+        you choose whether to update this file or save the links into a copy.</p>
     </div>
 
     <div id="fileLoaded" class="stack hidden">
@@ -138,9 +139,7 @@
 
   <!-- 4. Results -->
   <section class="card">
-    <h2><span class="num">4</span> Results <span class="spacer"></span>
-      <button type="button" class="subtle" id="btnResetAll">Clear all</button>
-    </h2>
+    <h2><span class="num">4</span> Results</h2>
 
     <div class="filters" id="filters">
       <button type="button" class="chip" data-filter="all" aria-pressed="true">All</button>
@@ -158,8 +157,27 @@
   <!-- 5. Export -->
   <section class="card">
     <h2><span class="num">5</span> Export</h2>
-    <div class="row-of-buttons">
-      <button type="button" class="primary" id="btnExportXlsx">Download updated .xlsx</button>
+
+    <div class="destination" role="radiogroup" aria-label="Where to save the links">
+      <label class="toggle">
+        <input type="radio" name="saveTarget" id="targetCopy" value="copy" checked>
+        <span class="text">
+          <strong>Save into a copy</strong>
+          <small>Downloads a new .xlsx and leaves your original file exactly as it is.</small>
+        </span>
+      </label>
+      <label class="toggle">
+        <input type="radio" name="saveTarget" id="targetOriginal" value="original">
+        <span class="text">
+          <strong>Update the original file</strong>
+          <small id="targetOriginalNote">Writes the links straight into the file you chose. Close it in
+            Excel first, or the write will fail.</small>
+        </span>
+      </label>
+    </div>
+
+    <div class="row-of-buttons" style="margin-top:12px">
+      <button type="button" class="primary" id="btnExportXlsx">Save links to .xlsx</button>
       <button type="button" id="btnExportCsv">Download CSV</button>
       <button type="button" id="btnCopyLinks">Copy links</button>
     </div>
@@ -167,7 +185,19 @@
       any point without waiting for the whole run to finish.</p>
   </section>
 
-  <!-- 6. Log -->
+  <!-- 6. Start over -->
+  <section class="card">
+    <h2><span class="num">6</span> Start over</h2>
+    <p class="hint" id="resetSummary">Nothing is stored yet.</p>
+    <div class="row-of-buttons">
+      <button type="button" class="danger solid" id="btnResetAll">Clear everything</button>
+    </div>
+    <p class="hint">This removes everything the extension has saved: the loaded catalog, every captured
+      link, the activity log, the cached copy of your file, and your settings. Your spreadsheet on disk is
+      never touched. Export your links first if you still need them.</p>
+  </section>
+
+  <!-- 7. Log -->
   <section class="card">
     <details class="log" id="logBox">
       <summary>Activity log <span class="spacer"></span></summary>

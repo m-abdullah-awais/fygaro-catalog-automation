@@ -22,6 +22,15 @@
   var sheetData = null;
   var headerInfo = null;
 
+  /* A handle to the file on disk, when the browser gave us one. It is what
+   * makes "update the original" possible: a plain file input only yields a
+   * snapshot of the bytes and no way to write back. Handles cannot go in
+   * chrome.storage because they are not JSON, so they live in IndexedDB. */
+  var fileHandle = null;
+
+  /* Confirmation of the last successful save, shown in the Export card. */
+  var lastSaveMessage = '';
+
   var view = { run: S.defaultRun(), rows: [], log: [] };
   var filter = 'all';
   var searchTerm = '';
@@ -81,6 +90,99 @@
 
   function note(level, message) {
     send(S.MSG.CONTENT_LOG, { level: level, message: message });
+  }
+
+  /* ---------------------------------------------------------- file handles */
+
+  var HANDLE_DB = 'fygaro-file';
+  var HANDLE_STORE = 'handles';
+
+  function openHandleDb() {
+    return new Promise(function (resolve, reject) {
+      // IndexedDB is absent in some contexts, a file:// page among them.
+      if (typeof indexedDB === 'undefined' || !indexedDB) {
+        reject(new Error('IndexedDB is not available here.'));
+        return;
+      }
+      var request;
+      try {
+        request = indexedDB.open(HANDLE_DB, 1);
+      } catch (err) {
+        reject(err);
+        return;
+      }
+      request.onupgradeneeded = function () {
+        if (!request.result.objectStoreNames.contains(HANDLE_STORE)) {
+          request.result.createObjectStore(HANDLE_STORE);
+        }
+      };
+      request.onsuccess = function () { resolve(request.result); };
+      request.onerror = function () { reject(request.error || new Error('IndexedDB could not be opened.')); };
+      request.onblocked = function () { reject(new Error('IndexedDB is blocked by another tab.')); };
+    });
+  }
+
+  /**
+   * Every path here is time limited. Remembering a file handle is a convenience,
+   * so if the database misbehaves the panel must carry on rather than sit
+   * waiting for an event that may never arrive.
+   */
+  function handleStore(mode, action) {
+    var work = openHandleDb().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var request;
+        try {
+          var tx = db.transaction(HANDLE_STORE, mode);
+          request = action(tx.objectStore(HANDLE_STORE));
+          tx.oncomplete = function () { db.close(); resolve(request ? request.result : undefined); };
+          tx.onerror = function () { db.close(); reject(tx.error); };
+          tx.onabort = function () { db.close(); reject(tx.error || new Error('The write was aborted.')); };
+        } catch (err) {
+          db.close();
+          reject(err);
+        }
+      });
+    });
+
+    var timeout = new Promise(function (resolve, reject) {
+      setTimeout(function () { reject(new Error('IndexedDB did not respond.')); }, 3000);
+    });
+    return Promise.race([work, timeout]);
+  }
+
+  function rememberHandle(handle) {
+    fileHandle = handle;
+    if (!handle) return Promise.resolve();
+    return handleStore('readwrite', function (store) { return store.put(handle, 'workbook'); })
+      .catch(function () { /* the run still works, only in place saving needs it */ });
+  }
+
+  function forgetHandle() {
+    fileHandle = null;
+    return handleStore('readwrite', function (store) { return store.delete('workbook'); })
+      .catch(function () {});
+  }
+
+  function restoreHandle() {
+    return handleStore('readonly', function (store) { return store.get('workbook'); })
+      .then(function (handle) { fileHandle = handle || null; return fileHandle; })
+      .catch(function () { return null; });
+  }
+
+  function canPickHandles() {
+    return typeof window.showOpenFilePicker === 'function';
+  }
+
+  /** Whether the handle we hold is still allowed to be written to. */
+  function handleWritable(prompt) {
+    if (!fileHandle || !fileHandle.queryPermission) return Promise.resolve(false);
+    return fileHandle.queryPermission({ mode: 'readwrite' }).then(function (state) {
+      if (state === 'granted') return true;
+      if (!prompt || !fileHandle.requestPermission) return false;
+      return fileHandle.requestPermission({ mode: 'readwrite' }).then(function (asked) {
+        return asked === 'granted';
+      });
+    }).catch(function () { return false; });
   }
 
   /* -------------------------------------------------------- catalog parsing */
@@ -223,6 +325,35 @@
     setHidden($('fileLoaded'), false);
     setHidden($('btnChangeFile'), false);
     return applyMapping();
+  }
+
+  /**
+   * Opens the file picker. When the browser supports file handles it is used in
+   * preference to the plain input, because only a handle can be written back to
+   * later. Everything still works without one, just without the in place option.
+   */
+  function choosePrimaryFile() {
+    if (!canPickHandles()) {
+      $('fileInput').click();
+      return;
+    }
+    window.showOpenFilePicker({
+      multiple: false,
+      types: [{
+        description: 'Excel workbook',
+        accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] }
+      }]
+    }).then(function (handles) {
+      var handle = handles && handles[0];
+      if (!handle) return null;
+      return rememberHandle(handle).then(function () { return handle.getFile(); });
+    }).then(function (file) {
+      if (file) openWorkbook(file);
+    }).catch(function (err) {
+      // AbortError just means the picker was dismissed, so do nothing.
+      if (err && err.name === 'AbortError') return;
+      $('fileInput').click();
+    });
   }
 
   function openWorkbook(file) {
@@ -533,15 +664,48 @@
     $('btnCopyLinks').disabled = !ready;
     $('btnExportXlsx').disabled = !ready || !workbook;
 
+    // Writing back in place needs a handle to the file, which only the file
+    // picker can give. A dropped or input chosen file is bytes and nothing more.
+    var canOverwrite = !!fileHandle;
+    $('targetOriginal').disabled = !canOverwrite;
+    if (!canOverwrite && $('targetOriginal').checked) $('targetCopy').checked = true;
+
+    $('targetOriginalNote').textContent = canOverwrite
+      ? 'Writes the links straight into ' + U.truncate(fileName, 44) + '. Close it in Excel first, or ' +
+        'the write will fail.'
+      : (canPickHandles()
+        ? 'Not available for this file. Choose it again with the Choose your catalog button, rather than ' +
+          'dropping it, so the browser can grant write access.'
+        : 'Not available in this browser. Only saving into a copy is possible here.');
+
+    $('btnExportXlsx').textContent = $('targetOriginal').checked
+      ? 'Update the original file'
+      : 'Download updated .xlsx';
+
     if (!ready) {
-      $('exportHint').textContent = 'Nothing to export yet. Links appear here as each one is created.';
+      $('exportHint').textContent = 'Nothing to save yet. Links appear here as each one is created.';
     } else if (!workbook) {
-      $('exportHint').textContent = withLinks + ' links ready. Load the catalog file again to export an ' +
+      $('exportHint').textContent = withLinks + ' links ready. Load the catalog file again to write an ' +
         'updated .xlsx, or use CSV which needs no file.';
     } else {
-      $('exportHint').textContent = withLinks + ' link' + (withLinks === 1 ? '' : 's') +
-        ' ready. Your original file is never modified: this downloads a new copy.';
+      $('exportHint').textContent = withLinks + ' link' + (withLinks === 1 ? '' : 's') + ' ready.' +
+        (lastSaveMessage ? '  ' + lastSaveMessage : '');
     }
+  }
+
+  /** Says exactly what is stored, so Clear everything is never a surprise. */
+  function renderReset(run, rows, log) {
+    var parts = [];
+    if (rows.length) parts.push(rows.length + ' rows');
+    var links = rows.filter(function (r) { return r.link; }).length;
+    if (links) parts.push(links + ' link' + (links === 1 ? '' : 's'));
+    if (run.file && run.file.name) parts.push('the file ' + U.truncate(run.file.name, 34));
+    if (log.length) parts.push(log.length + ' log line' + (log.length === 1 ? '' : 's'));
+
+    $('resetSummary').textContent = parts.length
+      ? 'Currently stored: ' + parts.join(', ') + '.'
+      : 'Nothing is stored yet.';
+    $('btnResetAll').disabled = !parts.length && run.status === S.STATUS.IDLE;
   }
 
   function render() {
@@ -555,6 +719,7 @@
     renderResults(view.run, view.rows);
     renderLog(view.log);
     renderExport(view.rows);
+    renderReset(view.run, view.rows, view.log);
   }
 
   function refresh() {
@@ -578,11 +743,33 @@
     setTimeout(function () { URL.revokeObjectURL(url); }, 30000);
   }
 
+  /** Writes the produced workbook straight back into the file on disk. */
+  function saveOverOriginal(blob, updates) {
+    return handleWritable(true).then(function (allowed) {
+      if (!allowed) {
+        throw new Error('Permission to write to the file was not granted. Choose the file again, or ' +
+          'save into a copy instead.');
+      }
+      return fileHandle.createWritable();
+    }).then(function (writable) {
+      // createWritable buffers and only commits on close, so a failure part way
+      // through does not leave a half written spreadsheet on disk.
+      return writable.write(blob).then(function () { return writable.close(); });
+    }).then(function () {
+      note('success', 'Wrote ' + updates.length + ' links into ' + fileName + '.');
+      // Confirmed in place rather than through a modal, so a long run does not
+      // stop dead behind a dialog nobody is there to dismiss.
+      lastSaveMessage = 'Updated ' + fileName + ' with ' + updates.length + ' link' +
+        (updates.length === 1 ? '' : 's') + ' at ' + U.clockTime() + '.';
+    });
+  }
+
   function exportXlsx() {
     if (!workbook) return;
     var file = view.run.file || {};
     var column = (file.mapping && file.mapping.link) || 'H';
     var sheetName = file.sheetName || $('sheetSelect').value;
+    var toOriginal = $('targetOriginal').checked && !!fileHandle;
 
     var updates = view.rows
       .filter(function (r) { return r.link; })
@@ -590,14 +777,25 @@
 
     if (!updates.length) return;
 
+    if (toOriginal && !window.confirm('Write ' + updates.length + ' link' +
+      (updates.length === 1 ? '' : 's') + ' into ' + fileName + '?\n\n' +
+      'This replaces the file on your disk. Close it in Excel first. Everything else in the workbook is ' +
+      'kept exactly as it is.')) return;
+
     $('btnExportXlsx').disabled = true;
     X.writeColumn(workbook, sheetName, column, updates)
       .then(function (blob) {
+        if (toOriginal) return saveOverOriginal(blob, updates);
         download(blob, X.exportName(fileName || file.name));
-        note('success', 'Exported ' + updates.length + ' links into a new copy of the workbook.');
+        note('success', 'Saved ' + updates.length + ' links into a new copy of the workbook.');
+        return null;
       })
       .catch(function (err) {
-        window.alert('The updated file could not be created.\n\n' + (err && err.message ? err.message : err));
+        var message = err && err.message ? err.message : String(err);
+        note('error', 'The workbook could not be saved: ' + message);
+        window.alert((toOriginal ? 'The original file could not be updated.'
+          : 'The updated file could not be created.') + '\n\n' + message +
+          (toOriginal ? '\n\nIf the file is open in Excel, close it and try again.' : ''));
       })
       .then(function () { renderExport(view.rows); });
   }
@@ -686,10 +884,34 @@
         dropzone.classList.remove('over');
       });
     });
+
+    dropzone.addEventListener('click', function () {
+      if (!confirmDiscardProgress('Loading a different file')) return;
+      choosePrimaryFile();
+    });
+    dropzone.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      dropzone.click();
+    });
+
     dropzone.addEventListener('drop', function (e) {
+      var item = e.dataTransfer && e.dataTransfer.items && e.dataTransfer.items[0];
       var file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
       if (!file) return;
       if (!confirmDiscardProgress('Loading a different file')) return;
+
+      // A drop can carry a real file handle too, which keeps the option to
+      // update the original file open. Without it only a copy can be saved.
+      if (item && typeof item.getAsFileSystemHandle === 'function') {
+        item.getAsFileSystemHandle()
+          .then(function (handle) {
+            return (handle && handle.kind === 'file') ? rememberHandle(handle) : null;
+          })
+          .catch(function () {})
+          .then(function () { openWorkbook(file); });
+        return;
+      }
       openWorkbook(file);
     });
 
@@ -735,20 +957,50 @@
     $('btnOpenFygaro').addEventListener('click', function () { send(S.MSG.OPEN_FYGARO); });
 
     $('btnResetAll').addEventListener('click', function () {
-      if (!window.confirm('Clear the loaded catalog, all captured links and the log?\n\n' +
-        'Export first if you still need the links. This cannot be undone.')) return;
-      send(S.MSG.RESET).then(function () {
-        workbook = null;
-        fileName = '';
-        sheetData = null;
-        headerInfo = null;
-        choosingFile = false;
-        setHidden($('fileEmpty'), false);
-        setHidden($('fileLoaded'), true);
-        setHidden($('btnChangeFile'), true);
-        $('fileInput').value = '';
-        return refresh();
+      var links = view.rows.filter(function (r) { return r.link; }).length;
+      var running = view.run.status === S.STATUS.RUNNING;
+
+      var warning = 'Clear everything?\n\n' +
+        'This removes the loaded catalog, all ' + links + ' captured link' + (links === 1 ? '' : 's') +
+        ', the activity log, the cached copy of your file, and your settings.\n\n' +
+        (running ? 'The run in progress will be stopped.\n\n' : '') +
+        'Your spreadsheet on disk is not touched. This cannot be undone.';
+      if (!window.confirm(warning)) return;
+
+      // Everything this panel holds is dropped straight away, before any async
+      // work. Waiting would let the re-render triggered by the cleared storage
+      // arrive first and leave stale interface state behind.
+      workbook = null;
+      fileName = '';
+      sheetData = null;
+      headerInfo = null;
+      choosingFile = false;
+      filter = 'all';
+      searchTerm = '';
+      lastSaveMessage = '';
+
+      $('fileInput').value = '';
+      $('search').value = '';
+      $('fileSummary').textContent = '';
+      $('sheetSelect').innerHTML = '';
+      ['mapName', 'mapCode', 'mapPrice', 'mapLink'].forEach(function (id) { $(id).innerHTML = ''; });
+      Array.prototype.forEach.call($('filters').children, function (c) {
+        c.setAttribute('aria-pressed', String(c.dataset.filter === 'all'));
       });
+      $('targetCopy').checked = true;
+      $('logBox').open = false;
+
+      setHidden($('fileEmpty'), false);
+      setHidden($('fileLoaded'), true);
+      setHidden($('btnChangeFile'), true);
+
+      // Forgetting the handle is a convenience and must not hold up the clear.
+      forgetHandle();
+      send(S.MSG.RESET).then(refresh);
+    });
+
+    ['targetCopy', 'targetOriginal'].forEach(function (id) {
+      $(id).addEventListener('change', function () { renderExport(view.rows); });
     });
 
     $('filters').addEventListener('click', function (e) {
@@ -785,7 +1037,10 @@
   /* -------------------------------------------------------------------- boot */
 
   wire();
-  restoreWorkbook()
+  // The file handle comes back first, so the panel knows straight away whether
+  // updating the original file is possible for the workbook it is about to load.
+  restoreHandle()
+    .then(restoreWorkbook)
     .then(function (wb) {
       if (!wb) return null;
       // Restore the sheet and mapping the run was started with.

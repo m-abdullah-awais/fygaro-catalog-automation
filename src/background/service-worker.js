@@ -393,9 +393,14 @@ handlers[S.MSG.STOP] = function (msg, bucket) {
   return restoreZoom(bucket.run).then(function () { return { ok: true }; });
 };
 
+/*
+ * Clears everything the extension has stored. Any run in progress ends here: the
+ * page zoom is handed back first, because once storage is gone there is no
+ * record of what it should be restored to.
+ */
 handlers[S.MSG.RESET] = function (msg, bucket) {
   return restoreZoom(bucket.run).then(function () {
-    return S.clear();
+    return S.clearAll();
   }).then(function () {
     return updateBadge(S.defaultRun());
   }).then(broadcast).then(function () {

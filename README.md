@@ -19,6 +19,7 @@ progress, pause and resume, and a patched spreadsheet at the end.
 - [Settings](#settings)
 - [When something goes wrong](#when-something-goes-wrong)
 - [Exporting](#exporting)
+- [Starting over](#starting-over)
 - [How it works](#how-it-works)
 - [Project layout](#project-layout)
 - [Testing](#testing)
@@ -166,19 +167,46 @@ Everything captured so far stays saved, and you can export at any point.
 
 ## Exporting
 
+You choose where the links go:
+
+| Option | What happens |
+|--------|--------------|
+| **Save into a copy** (default) | Downloads a new `.xlsx`. Your original file is never touched. |
+| **Update the original file** | Writes the links straight into the file you chose, in place. |
+
 | Button | Produces |
 |--------|----------|
-| Download updated .xlsx | A **new copy** of your workbook with column H filled in |
+| Save links to .xlsx | Either of the two above, depending on the option selected |
 | Download CSV | Sheet row, Código, Servicios and Link, for pasting anywhere |
 | Copy links | The same data on your clipboard, tab separated |
 
-**Your original file is never modified.** The export is a separate download that keeps every other sheet,
-all formatting, formulas, data validations, drawings and the existing hyperlink exactly as they were. Only
-the cells in column H that gained a link differ, and links already in the sheet are left untouched.
+**Updating the original** needs the browser to grant write access to that exact file, which only the file
+picker can do. Use the **Choose your catalog** button rather than dragging the file in, and the option
+becomes available. Dragging still works, and Chrome hands over a handle for drops too where it can. If the
+option stays greyed out, the text under it says why.
 
-The workbook is cached inside the extension, so the `.xlsx` export still works after you close the panel or
-restart the browser. If the cache is ever lost, load the same file again, or use the CSV export which needs
-no file at all.
+**Close the file in Excel first.** Windows will not let anything replace a file Excel is holding open, and
+the panel will tell you so rather than failing quietly. The write is buffered and only committed at the
+end, so an interrupted save cannot leave a half written spreadsheet behind.
+
+Either way, everything else in the workbook survives: all other sheets, formatting, formulas, data
+validations, drawings and the hyperlink that was already there. Only the cells in column H that gained a
+link differ.
+
+The workbook is cached inside the extension, so exporting still works after you close the panel or restart
+the browser. If the cache is ever lost, load the same file again, or use the CSV export which needs no file
+at all.
+
+---
+
+## Starting over
+
+**Clear everything** in section 6 removes everything the extension has saved: the loaded catalog, every
+captured link, the activity log, the cached copy of your file, its write permission, and your settings. The
+panel tells you exactly what is stored before you press it, and asks for confirmation naming how many links
+you are about to lose.
+
+Your spreadsheet on disk is never touched by this. Export your links first if you still need them.
 
 ---
 
@@ -278,14 +306,16 @@ npm run lint       # syntax, house rules, and manifest references
 | `tests/xlsx.test.mjs` | 9 | ZIP round trips, style preservation, XML escaping, and that an unedited rewrite reproduces all 30 parts byte for byte |
 | `tests/selectors.test.html` | 38 | Every locator, run against the eight captured page snapshots, with Fygaro's checkbox styling reproduced |
 | `tests/xlsx.test.html` | 11 | Workbook reading, sheet and column detection, patch and re read |
-| `tests/integration.test.html` | 21 | The real side panel driving the real worker through a full run |
+| `tests/integration.test.html` | 24 | The real side panel driving the real worker through a full run |
 
 The integration suite is the interesting one. It stubs the Chrome APIs, loads the actual worker and the
 actual panel, then plays a run through: 699 rows loaded, all seven steps walked for several rows, a failure
 retried then escalated, a row skipped, pause and resume, a stalled navigation escalated, a reload prompt
 declined without losing links, the page zoomed out before work begins and handed back on stop, zooming
 retried after a failure, a blank settings field keeping its default rather than inventing one, a dry run,
-and an export verified cell by cell against the original workbook.
+an in place save checked cell by cell against a stand in file handle, a refused write permission that
+changes nothing, and a Clear everything that empties storage and puts the panel back to its first run
+state.
 
 The locator suite deliberately applies Fygaro's own checkbox styling to the snapshots, hiding the real
 inputs behind painted replacements. Without that the snapshots render as plain visible checkboxes and a
