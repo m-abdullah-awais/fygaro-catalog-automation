@@ -218,6 +218,60 @@
   };
 
   /**
+   * Puts real files into a file input, the way choosing them in the picker does.
+   *
+   * D.setNativeValue must not be used here: the value setter on a file input
+   * throws for any non empty value, and React does not control a file input's
+   * value at all. It reads event.target.files inside its change handler, so the
+   * FileList is assigned directly and a bubbling change is fired after.
+   *
+   * The assignment is checked BEFORE the events go out, on purpose. Upload
+   * widgets commonly clear the input inside their own change handler so the same
+   * file can be picked twice in a row, and dispatchEvent runs that handler
+   * synchronously, so checking afterwards would read zero files and report
+   * failure on what was actually a success.
+   *
+   * @returns {boolean} whether the files were accepted by the input
+   */
+  D.setFiles = function (input, files) {
+    if (!input || !files || !files.length) return false;
+    if (typeof DataTransfer !== 'function') return false;
+
+    var carrier = new DataTransfer();
+    for (var i = 0; i < files.length; i++) carrier.items.add(files[i]);
+
+    try {
+      input.files = carrier.files;
+    } catch (err) {
+      return false;
+    }
+    if (!input.files || input.files.length !== files.length) return false;
+
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  };
+
+  /**
+   * Drops files onto an element, for a widget that listens for a drop on its own
+   * box rather than for a change on the input hidden behind it.
+   */
+  D.dropFiles = function (target, files) {
+    if (!target || !files || !files.length) return false;
+    if (typeof DataTransfer !== 'function' || typeof DragEvent !== 'function') return false;
+
+    var carrier = new DataTransfer();
+    for (var i = 0; i < files.length; i++) carrier.items.add(files[i]);
+
+    ['dragenter', 'dragover', 'drop'].forEach(function (type) {
+      target.dispatchEvent(new DragEvent(type, {
+        bubbles: true, cancelable: true, dataTransfer: carrier
+      }));
+    });
+    return true;
+  };
+
+  /**
    * Validation text that a control's own label renders after it.
    *
    * Fygaro gives that message a content hashed class with no "error" or

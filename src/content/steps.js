@@ -30,6 +30,9 @@
 
   var LINK_PATTERN = /^https?:\/\/[^\s]*\/pb\/[0-9a-f-]{36}\/?$/i;
 
+  /* Legends the product form uses over its picture gallery, folded for matching. */
+  var GALLERY_LEGENDS = ['gallery', 'galeria', 'imagenes', 'images', 'fotos'];
+
   /*
    * Wording Fygaro uses when a product Code is already taken, folded so case and
    * accents do not matter.
@@ -151,6 +154,35 @@
     return D.firstByText('button[type="submit"]', ['Save', 'Guardar'], { scope: scope }) ||
       D.byText('button[type="submit"]', ['Save', 'Guardar'], { scope: scope })[0] ||
       D.control('button[type="submit"]', scope);
+  };
+
+  /**
+   * The Gallery file input on the product form.
+   *
+   * Found by its own attributes and then confirmed by the legend of the fieldset
+   * it sits in, never by class name, because Fygaro's classes are content
+   * hashed. The legend check is what stops this grabbing some other upload field
+   * a redesign might add elsewhere on the form.
+   *
+   * D.all rather than D.first: the real input is hidden behind a painted drop
+   * box, exactly like the requirement checkboxes, so demanding visibility would
+   * find nothing on the live site.
+   */
+  locate.galleryInput = function (scope) {
+    var inputs = D.all('input[type="file"]', scope).filter(function (el) {
+      var accept = String(el.getAttribute('accept') || '');
+      return accept === '' || accept.indexOf('image') !== -1;
+    });
+    if (!inputs.length) return null;
+
+    var inGallery = inputs.filter(function (el) {
+      var box = el.closest ? el.closest('fieldset') : null;
+      var legend = box ? box.querySelector('legend') : null;
+      return !!legend && GALLERY_LEGENDS.indexOf(U.foldText(legend.textContent)) !== -1;
+    })[0];
+    if (inGallery) return inGallery;
+
+    return inputs.filter(function (el) { return el.name === 'files'; })[0] || inputs[0];
   };
 
   /**

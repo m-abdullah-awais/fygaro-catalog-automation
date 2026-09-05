@@ -196,6 +196,102 @@
       });
     })
     .then(function () {
+      return check('reads the pictures anchored to each row', function () {
+        var found = X.readImages(wb, SHEET);
+        assert(found.byRow.size === 5, 'expected 5 rows with pictures, saw ' + found.byRow.size);
+        assert(found.images.size === 3, 'expected 3 distinct pictures, saw ' + found.images.size);
+        assert(found.byRow.get(2).length === 1, 'row 2 should carry one picture');
+        assert(found.byRow.get(5).length === 2, 'row 5 should carry two pictures');
+        assert(!found.byRow.has(7), 'a row with no picture should be absent, not empty');
+        return found.byRow.size + ' rows, ' + found.images.size + ' distinct pictures';
+      });
+    })
+    .then(function () {
+      return check('one picture shared by several rows is stored once', function () {
+        var found = X.readImages(wb, SHEET);
+        var first = found.byRow.get(2)[0];
+        assert(found.byRow.get(3)[0] === first, 'rows 2 and 3 should share a picture');
+        assert(found.images.get(first), 'the shared picture is missing from the table');
+        assert(found.images.get(first).bytes.length > 0, 'the picture has no bytes');
+        return first + ' is used by rows 2 and 3';
+      });
+    })
+    .then(function () {
+      return check('the format is read from the bytes, not from the file name', function () {
+        var found = X.readImages(wb, SHEET);
+        var byName = {};
+        found.images.forEach(function (img) { byName[img.name] = img; });
+        assert(byName['image1.png'].type === 'image/png', 'image1.png is ' + byName['image1.png'].type);
+        assert(byName['image2.jpg'].type === 'image/jpeg', 'image2.jpg is ' + byName['image2.jpg'].type);
+        // Deliberately JPEG bytes behind a .png name. Trusting the extension
+        // would upload a JPEG labelled as a PNG.
+        assert(byName['image3.png'].type === 'image/jpeg',
+          'image3.png should sniff as JPEG, saw ' + byName['image3.png'].type);
+        return 'PNG, JPEG, and a JPEG wearing a .png name';
+      });
+    })
+    .then(function () {
+      return check('a picture stretched across cells belongs to the row it starts in', function () {
+        var found = X.readImages(wb, SHEET);
+        assert(found.byRow.has(6), 'the twoCellAnchor picture was lost');
+        assert(found.byRow.get(6).length === 1, 'row 6 should carry one picture');
+        return 'twoCellAnchor attributed to its from row';
+      });
+    })
+    .then(function () {
+      return check('a picture floating free of any row is reported, not guessed at', function () {
+        var found = X.readImages(wb, SHEET);
+        var loose = found.skipped.filter(function (s) { return s.reason === 'unanchored'; });
+        assert(loose.length === 1, 'expected 1 unanchored picture, saw ' + loose.length);
+        var rows = [];
+        found.byRow.forEach(function (ids, row) { rows.push(row); });
+        assert(rows.indexOf(null) === -1, 'a null row leaked into the map');
+        return 'absoluteAnchor skipped with a reason';
+      });
+    })
+    .then(function () {
+      return check('every anchored picture sits in the images column', function () {
+        var anchors = X.parseDrawingAnchors(
+          new TextDecoder('utf-8').decode(wb.files.get('xl/drawings/drawing1.xml')));
+        var placed = anchors.filter(function (a) { return a.row !== null; });
+        placed.forEach(function (a) {
+          assert(a.col === 7, 'a picture is anchored at column index ' + a.col + ', expected 7 (H)');
+        });
+        return placed.length + ' pictures, all in column H';
+      });
+    })
+    .then(function () {
+      return check('a sheet nobody put pictures on yields an empty map, not an error', function () {
+        // El Consultorio has a drawing relationship pointing at a part with no
+        // anchors and no relationships file of its own.
+        var found = X.readImages(wb, 'El Consultorio');
+        assert(found.byRow.size === 0, 'expected no pictures, saw ' + found.byRow.size);
+        assert(found.images.size === 0, 'expected no image table');
+        return 'empty and quiet';
+      });
+    })
+    .then(function () {
+      return check('reading the pictures twice returns the same work', function () {
+        assert(X.readImages(wb, SHEET) === X.readImages(wb, SHEET), 'the result should be cached');
+        return 'cached per sheet';
+      });
+    })
+    .then(function () {
+      return check('relationship targets resolve relative to the part that declared them', function () {
+        assert(X.resolvePart('xl/drawings/drawing1.xml', '../media/image1.png') === 'xl/media/image1.png',
+          'parent relative failed');
+        assert(X.resolvePart('xl/drawings/drawing1.xml', './image1.png') === 'xl/drawings/image1.png',
+          'same directory failed');
+        assert(X.resolvePart('xl/drawings/drawing1.xml', 'image1.png') === 'xl/drawings/image1.png',
+          'bare name failed');
+        assert(X.resolvePart('xl/drawings/drawing1.xml', '/xl/media/image1.png') === 'xl/media/image1.png',
+          'package absolute failed');
+        assert(X.relsPathFor('xl/worksheets/sheet1.xml') === 'xl/worksheets/_rels/sheet1.xml.rels',
+          'rels path failed');
+        return 'relative, absolute and bare targets all resolve';
+      });
+    })
+    .then(function () {
       return check('a sheet with no Link column gets one proposed past the images', function () {
         assert(X.findColumn(header, S.HEADERS.link) === '', 'this sheet should have no Link column');
         assert(header.byLabel[U.foldText('Columna 1')] === 'H', 'the images column should be H');

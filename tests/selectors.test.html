@@ -45,6 +45,16 @@
       padding: 0;
       border: 0;
     }
+
+    /* The Gallery input is hidden behind a painted drop box on the live site,
+       for the same reason and with the same consequence for any locator that
+       insists on visibility. */
+    #stage input[type="file"] {
+      position: absolute;
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
   </style>
 </head>
 <body>
@@ -267,6 +277,101 @@
       var save = locate.saveButton(scope);
       assert(U.foldText(save.textContent) === 'save', 'picked "' + U.textOf(save) + '" instead of Save');
       return D.describe(save);
+    });
+
+    /* ----------------------------------------------- step 3 picture gallery */
+
+    function tinyPng(name) {
+      var bytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13]);
+      return new File([bytes], name || 'image1.png', { type: 'image/png' });
+    }
+
+    check('step 3: finds the Gallery file input on the product form', function () {
+      var scope = mount('add');
+      var input = locate.galleryInput(scope);
+      assert(input, 'the Gallery input was not found');
+      assert(input.name === 'files', 'wrong field: ' + input.name);
+      assert(input.multiple === true, 'the field should accept several files');
+      assert((input.getAttribute('accept') || '').indexOf('image') !== -1, 'wrong accept attribute');
+      var legend = input.closest('fieldset').querySelector('legend');
+      assert(U.textOf(legend) === 'Gallery', 'wrong fieldset: ' + U.textOf(legend));
+      return D.describe(input);
+    });
+
+    check('step 3: the Gallery input is hidden by CSS, exactly as on the live site', function () {
+      var scope = mount('add');
+      var input = locate.galleryInput(scope);
+      assert(D.isVisible(input) === false, 'the snapshot should render it hidden');
+      assert(D.first('input[type="file"]', scope) === null, 'a visibility first lookup should find nothing');
+      assert(input !== null, 'the locator must still find it');
+      return 'found despite being unpainted';
+    });
+
+    check('step 3: the Gallery input is the only file field on the form', function () {
+      // A second upload field appearing in a redesign would be caught here
+      // rather than by uploading a product photo into the wrong place.
+      var scope = mount('add');
+      assert(D.all('input[type="file"]', scope).length === 1,
+        'the form now has ' + D.all('input[type="file"]', scope).length + ' file fields');
+      return 'exactly one';
+    });
+
+    check('step 3: the Gallery input is found on the edit and rejected forms too', function () {
+      ['edit-product', 'duplicate-product-err'].forEach(function (name) {
+        var scope = mount(name);
+        assert(locate.galleryInput(scope), 'not found on ' + name);
+      });
+      return 'add, edit-product and duplicate-product-err';
+    });
+
+    check('step 3: setFiles hands a real File to the input and fires change', function () {
+      var scope = mount('add');
+      var input = locate.galleryInput(scope);
+      var seen = [];
+      input.addEventListener('change', function (e) { seen.push(e.target.files.length); });
+
+      assert(D.setFiles(input, [tinyPng('image8.png')]) === true, 'setFiles reported failure');
+      assert(input.files.length === 1, 'the input holds ' + input.files.length + ' files');
+      assert(input.files[0].name === 'image8.png', 'wrong name: ' + input.files[0].name);
+      assert(input.files[0].type === 'image/png', 'wrong type: ' + input.files[0].type);
+      assert(seen.length === 1 && seen[0] === 1, 'change fired ' + seen.length + ' times with ' + seen[0]);
+      return 'one file, one change event';
+    });
+
+    check('step 3: setFiles survives a widget that clears the input on change', function () {
+      // Upload widgets commonly reset the input inside their own change handler
+      // so the same file can be chosen twice running. Checking the assignment
+      // after dispatching would read zero files and call a success a failure.
+      var scope = mount('add');
+      var input = locate.galleryInput(scope);
+      var received = 0;
+      input.addEventListener('change', function (e) {
+        received = e.target.files.length;
+        e.target.value = '';
+      });
+
+      assert(D.setFiles(input, [tinyPng()]) === true, 'setFiles reported failure after the widget cleared it');
+      assert(received === 1, 'the widget saw ' + received + ' files');
+      return 'checked before dispatch, so the clear cannot fake a failure';
+    });
+
+    check('step 3: setFiles accepts several files at once', function () {
+      var scope = mount('add');
+      var input = locate.galleryInput(scope);
+      assert(D.setFiles(input, [tinyPng('a.png'), tinyPng('b.png')]) === true, 'two files were refused');
+      assert(input.files.length === 2, 'the input holds ' + input.files.length);
+      return 'two files';
+    });
+
+    check('step 3: setFiles reports failure rather than pretending', function () {
+      var scope = mount('add');
+      var input = locate.galleryInput(scope);
+      var fired = 0;
+      input.addEventListener('change', function () { fired++; });
+      assert(D.setFiles(input, []) === false, 'an empty list should be refused');
+      assert(D.setFiles(null, [tinyPng()]) === false, 'a missing input should be refused');
+      assert(fired === 0, 'nothing should have been dispatched');
+      return 'no silent success';
     });
 
     /* -------------------------------------------- step 3 duplicate code error */
