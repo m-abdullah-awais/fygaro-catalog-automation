@@ -256,6 +256,25 @@
       : choices, chosen.link);
   }
 
+  /** The span of sheet rows the run should cover, clamped to what exists. */
+  function currentRange() {
+    var first = sheetData.rows.length ? sheetData.rows[0].r : 1;
+    var last = sheetData.maxRow || first;
+    sheetData.rows.forEach(function (r) {
+      if (r.r > headerInfo.headerRow && r.r > last) last = r.r;
+    });
+    if (first <= headerInfo.headerRow) first = headerInfo.headerRow + 1;
+
+    var from = parseInt($('rowFrom').value, 10);
+    var to = parseInt($('rowTo').value, 10);
+    return {
+      from: isNaN(from) ? first : Math.max(first, from),
+      to: isNaN(to) ? last : Math.min(last, to),
+      first: first,
+      last: last
+    };
+  }
+
   function currentMapping() {
     return {
       name: $('mapName').value,
@@ -269,6 +288,7 @@
   function buildRows(mapping) {
     var rows = [];
     var problems = 0;
+    var range = currentRange();
 
     sheetData.rows.forEach(function (r) {
       if (r.r <= headerInfo.headerRow) return;
@@ -281,6 +301,14 @@
 
       var parsed = FYG.price.parse(priceRaw);
       if (!parsed.ok && !link) problems++;
+
+      // Outside the chosen range is not a failure, it is simply not this
+      // batch's work, so it reads as skipped rather than as something wrong.
+      var outOfRange = !link && (r.r < range.from || r.r > range.to);
+
+      // Fygaro is unlikely to accept a product priced at nothing, and finding
+      // out row by row during a run that lasts hours is the worst way to learn.
+      var freeOfCharge = parsed.ok && parsed.value === 0;
 
       var pictures = imageIndex ? imageIndex.byRow.get(r.r) : null;
 
@@ -297,10 +325,13 @@
         link: link,
         // A row the automation cannot possibly complete is flagged now rather
         // than failing halfway through the run.
-        blocked: !link && (!name || !code || !parsed.ok),
-        blockedReason: !name ? 'This row has no service name.'
+        outOfRange: outOfRange,
+        blocked: !link && !outOfRange && (!name || !code || !parsed.ok || freeOfCharge),
+        blockedReason: outOfRange ? 'Fuera del rango elegido (' + range.from + ' a ' + range.to + ').'
+          : !name ? 'This row has no service name.'
           : !code ? 'This row has no code.'
           : !parsed.ok ? 'The price "' + priceRaw + '" could not be read.'
+          : freeOfCharge ? 'El precio es cero.'
           : ''
       });
     });
@@ -322,6 +353,14 @@
       'Export them first if you still need them. Continue?');
   }
 
+  /** Puts the row range fields back to what the run is actually using. */
+  function restoreRangeFields() {
+    var file = view.run.file;
+    if (!file || !file.range) return;
+    $('rowFrom').value = file.range.from;
+    $('rowTo').value = file.range.to;
+  }
+
   /** Puts the sheet and column dropdowns back to what the run is actually using. */
   function restoreMappingSelects() {
     var file = view.run.file;
@@ -335,15 +374,24 @@
   function applyMapping() {
     if (!sheetData || !headerInfo) return;
     var mapping = currentMapping();
+    var chosen = currentRange();
     var built = buildRows(mapping);
+
+    // Show the range that was actually used, so a bound left blank or typed
+    // past the end of the sheet is corrected on screen rather than silently.
+    $('rowFrom').value = chosen.from;
+    $('rowTo').value = chosen.to;
 
     var withLink = built.rows.filter(function (r) { return r.link; }).length;
     var blocked = built.rows.filter(function (r) { return r.blocked; }).length;
 
+    var outside = built.rows.filter(function (r) { return r.outOfRange; }).length;
+
     var summary = built.rows.length + ' rows found. ' +
-      (built.rows.length - withLink - blocked) + ' to process, ' +
+      (built.rows.length - withLink - blocked - outside) + ' to process, ' +
       withLink + ' already have a link';
     if (blocked) summary += ', ' + blocked + ' cannot be processed';
+    if (outside) summary += ', ' + outside + ' outside rows ' + chosen.from + ' to ' + chosen.to;
     if (proposed.link) {
       summary += '. Links will go into a new column ' + proposed.link;
     }
@@ -367,7 +415,8 @@
         // exactly when the sheet did not already have that column.
         linkHeader: mapping.link && mapping.link === proposed.link ? S.LINK_HEADER : '',
         noteColumn: noteColumn,
-        noteHeader: proposed.note && proposed.note === noteColumn ? S.NOTE_HEADER : ''
+        noteHeader: proposed.note && proposed.note === noteColumn ? S.NOTE_HEADER : '',
+        range: { from: chosen.from, to: chosen.to }
       },
       rows: built.rows
     }).then(refresh);
@@ -1047,6 +1096,15 @@
     ['mapName', 'mapCode', 'mapPrice', 'mapLink'].forEach(function (id) {
       $(id).addEventListener('change', function () {
         if (!confirmDiscardProgress('Changing the column mapping')) return restoreMappingSelects();
+        applyMapping();
+      });
+    });
+
+    // The range decides which rows are in scope, so changing it rebuilds them
+    // behind the same guard as the mapping rather than silently discarding work.
+    ['rowFrom', 'rowTo'].forEach(function (id) {
+      $(id).addEventListener('change', function () {
+        if (!confirmDiscardProgress('Changing the row range')) return restoreRangeFields();
         applyMapping();
       });
     });

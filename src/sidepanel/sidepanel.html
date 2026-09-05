@@ -55,7 +55,17 @@
         <div class="pairing"><span>Code</span><select id="mapCode"></select></div>
         <div class="pairing"><span>Price</span><select id="mapPrice"></select></div>
         <div class="pairing"><span>Link</span><select id="mapLink"></select></div>
+        <div class="pairing">
+          <span>Rows</span>
+          <div class="rowRange">
+            <input type="number" id="rowFrom" min="1" step="1" aria-label="First sheet row to process">
+            <span>to</span>
+            <input type="number" id="rowTo" min="1" step="1" aria-label="Last sheet row to process">
+          </div>
+        </div>
       </div>
+      <small class="hint">A catalog this size takes many hours. Narrow the range to work through it in
+        batches; rows outside it are left alone and can be done later.</small>
 
       <div class="stats">
         <div class="stat"><b id="statTotal">0</b><span>Rows</span></div>

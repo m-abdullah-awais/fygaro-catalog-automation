@@ -298,6 +298,9 @@ input:focus, select:focus { border-color: var(--primary); }
 .mapping { display: grid; gap: var(--sp-2); }
 .mapping .pairing { display: grid; grid-template-columns: 88px 1fr; align-items: center; gap: var(--sp-2); }
 .mapping .pairing > span { font-size: var(--fs-xs); font-weight: 600; color: var(--text-secondary); }
+.mapping .rowRange { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: var(--sp-2); }
+.mapping .rowRange > span { font-size: var(--fs-xs); color: var(--text-secondary); text-align: center; }
+.mapping .rowRange input { width: 100%; }
 
 /* Toggle */
 .toggle { display: flex; align-items: flex-start; gap: var(--sp-2); cursor: pointer; }

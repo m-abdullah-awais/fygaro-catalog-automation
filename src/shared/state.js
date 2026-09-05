@@ -48,7 +48,8 @@
    */
   S.SKIP = {
     HAD_LINK: 'hadLink',   // the sheet already carried a link for it
-    EXISTS: 'exists'       // Fygaro already has a product with that code
+    EXISTS: 'exists',      // Fygaro already has a product with that code
+    OUT_OF_RANGE: 'range'  // deliberately left for another batch
   };
 
   S.STEP = {

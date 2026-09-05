@@ -352,6 +352,47 @@
     })
 
     .then(function () {
+      return check('a row range leaves the rest of the sheet alone, then restores', function () {
+        confirmAnswer = true;
+        $('rowFrom').value = '4';
+        $('rowTo').value = '6';
+        $('rowTo').dispatchEvent(new Event('change'));
+
+        return waitUntil(function () {
+          return $('statSkipped').textContent !== '0';
+        }, 'the rows outside the range to be set aside')
+          .then(readState)
+          .then(function (data) {
+            var inRange = data.rows.filter(function (r) { return r.status === S.ROW.PENDING; });
+            assert(inRange.length === 3, inRange.length + ' rows are still to do, expected 3');
+            assert(inRange[0].sheetRow === 4, 'the first is sheet row ' + inRange[0].sheetRow);
+            assert(inRange[2].sheetRow === 6, 'the last is sheet row ' + inRange[2].sheetRow);
+
+            var outside = data.rows.filter(function (r) { return r.reason === S.SKIP.OUT_OF_RANGE; });
+            assert(outside.length === 27, outside.length + ' rows were set aside, expected 27');
+            assert(/Fuera del rango/.test(outside[0].error), 'unhelpful reason: ' + outside[0].error);
+            // Not a failure: nothing is wrong with these rows.
+            assert(data.run.stats.failed === 0, 'rows outside the range were counted as failures');
+
+            // Put the whole sheet back so the rest of the suite runs as before.
+            $('rowFrom').value = '';
+            $('rowTo').value = '';
+            $('rowTo').dispatchEvent(new Event('change'));
+            return waitUntil(function () { return $('statSkipped').textContent === '0'; }, 'the full sheet');
+          })
+          .then(readState)
+          .then(function (data) {
+            assert(data.rows.filter(function (r) { return r.status === S.ROW.PENDING; }).length === 30,
+              'clearing the range should put all 30 rows back');
+            assert($('rowFrom').value === '2' && $('rowTo').value === '31',
+              'the fields should show the range actually used, saw ' +
+              $('rowFrom').value + ' to ' + $('rowTo').value);
+            return '3 rows in range, 27 set aside, then all 30 back';
+          });
+      });
+    })
+
+    .then(function () {
       return check('Start opens Fygaro and begins at the first unfinished row', function () {
         $('btnStart').click();
         return waitUntil(function () { return $('statusPill').dataset.status === 'running'; }, 'the run to start')

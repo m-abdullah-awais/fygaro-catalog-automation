@@ -259,9 +259,14 @@ handlers[S.MSG.LOAD_CATALOG] = function (msg, bucket) {
       // A row that already carries a link is left alone, which is what makes a
       // restart safe. A row missing a name, code or readable price is marked
       // failed up front rather than breaking the run halfway through.
-      status: r.link ? S.ROW.SKIPPED : (r.blocked ? S.ROW.FAILED : S.ROW.PENDING),
-      error: r.link ? '' : (r.blocked ? r.blockedReason || 'This row cannot be processed.' : ''),
-      reason: r.link ? S.SKIP.HAD_LINK : '',
+      // Out of range is skipped, not failed: nothing is wrong with the row, it
+      // simply is not part of this batch, and the Failed tile is what the user
+      // checks at the end to decide what needs doing by hand.
+      status: r.link ? S.ROW.SKIPPED
+        : r.outOfRange ? S.ROW.SKIPPED
+        : (r.blocked ? S.ROW.FAILED : S.ROW.PENDING),
+      error: r.link ? '' : ((r.blocked || r.outOfRange) ? r.blockedReason || 'This row cannot be processed.' : ''),
+      reason: r.link ? S.SKIP.HAD_LINK : (r.outOfRange ? S.SKIP.OUT_OF_RANGE : ''),
       productUuid: '',
       finishedAt: null
     };
