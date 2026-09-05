@@ -153,7 +153,8 @@
           link: result.link || '',
           productUuid: result.productUuid || '',
           landedRoute: result.landedRoute || '',
-          duplicate: result.duplicate || ''
+          duplicate: result.duplicate || '',
+          imageName: result.imageName || ''
         });
       })
       .catch(function (err) {

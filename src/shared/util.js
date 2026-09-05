@@ -36,6 +36,29 @@
    * Normalises page text for comparison: non breaking spaces become normal
    * spaces, runs of whitespace collapse, and the result is trimmed.
    */
+  /*
+   * Bytes to base64 and back. Needed because chrome.runtime messages are JSON,
+   * so an ArrayBuffer cannot survive the trip to the page.
+   *
+   * The conversion is chunked because String.fromCharCode.apply throws on a
+   * large enough array, and a product picture is comfortably large enough.
+   */
+  U.bytesToBase64 = function (bytes) {
+    var chunk = 0x8000;
+    var parts = [];
+    for (var i = 0; i < bytes.length; i += chunk) {
+      parts.push(String.fromCharCode.apply(null, bytes.subarray(i, i + chunk)));
+    }
+    return btoa(parts.join(''));
+  };
+
+  U.base64ToBytes = function (b64) {
+    var binary = atob(b64);
+    var out = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+    return out;
+  };
+
   U.normText = function (s) {
     return String(s == null ? '' : s)
       .replace(/\u00a0/g, ' ')

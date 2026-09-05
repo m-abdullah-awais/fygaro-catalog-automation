@@ -98,8 +98,19 @@
     STEP_DONE: 'STEP_DONE',
     STEP_FAILED: 'STEP_FAILED',
     CONTENT_LOG: 'CONTENT_LOG',
-    OPEN_FYGARO: 'OPEN_FYGARO'
+    OPEN_FYGARO: 'OPEN_FYGARO',
+    REQUEST_IMAGE: 'REQUEST_IMAGE'
   };
+
+  /*
+   * Product pictures are sent to the page in pieces.
+   *
+   * A message has to be JSON, so the bytes travel base64 encoded, which makes
+   * the largest picture in the catalog about 3.2 MB of string. One message that
+   * size does work, but it is exactly the kind of thing that starts failing
+   * quietly on a slower machine, so it is chunked instead.
+   */
+  S.IMAGE_CHUNK_BYTES = 512 * 1024;
 
   S.APP_URL = 'https://www.fygaro.com/en/app/dashboard/';
   S.ORIGIN = 'https://www.fygaro.com';

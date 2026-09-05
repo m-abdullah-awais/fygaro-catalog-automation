@@ -41,7 +41,12 @@
   }
 
   function check(name, fn) {
-    return Promise.resolve().then(fn)
+    // A check that never settles used to stall the whole page, which reported
+    // nothing at all and said nothing about which one was stuck. It fails now.
+    var stall = new Promise(function (resolve, reject) {
+      setTimeout(function () { reject(new Error('this check never finished')); }, 8000);
+    });
+    return Promise.race([Promise.resolve().then(fn), stall])
       .then(function (detail) { results.push({ ok: true, name: name, detail: detail || '' }); })
       .catch(function (err) {
         results.push({ ok: false, name: name, detail: String(err && err.message ? err.message : err) });
@@ -86,13 +91,19 @@
             answered = true;
             resolve(clone(response));
           };
-          var wantsAsync = false;
-          messageListeners.forEach(function (listener) {
-            var result = listener(clone(message), { tab: null }, settle);
-            if (result === true) wantsAsync = true;
-          });
-          // No listener took the message, so resolve like Chrome would.
-          if (!wantsAsync) setTimeout(function () { settle(undefined); }, 0);
+          // Delivered on its own task, as Chrome does. Calling the listeners
+          // straight from this executor meant any IndexedDB transaction a
+          // handler opened was created inside the caller's task and never
+          // became active, so the read never completed and the page hung.
+          setTimeout(function () {
+            var wantsAsync = false;
+            messageListeners.forEach(function (listener) {
+              var result = listener(clone(message), { tab: null }, settle);
+              if (result === true) wantsAsync = true;
+            });
+            // No listener took the message, so resolve like Chrome would.
+            if (!wantsAsync) settle(undefined);
+          }, 0);
         });
       },
       onMessage: { addListener: function (fn) { messageListeners.push(fn); } },
@@ -450,6 +461,115 @@
     })
 
     .then(function () {
+      return check('loading the catalog stores each picture once, not once per row', function () {
+        return FYG.idb.run('images', 'readonly', function (store) { return store.getAll(); })
+          .then(function (stored) {
+            assert(stored.length === 3, 'expected 3 stored pictures, saw ' + stored.length);
+            var types = stored.map(function (r) { return r.type; }).sort();
+            assert(types.join(',') === 'image/jpeg,image/jpeg,image/png',
+              'stored types are ' + types.join(','));
+            return stored.length + ' pictures held once each';
+          });
+      });
+    })
+
+    .then(function () {
+      return check('every row that has a picture carries its id, the rest carry none', function () {
+        return readState().then(function (data) {
+          var withImage = data.rows.filter(function (r) { return r.imageId; });
+          // Five anchors sit on four rows, one of which carries two pictures.
+          assert(withImage.length === 5, withImage.length + ' rows carry a picture, expected 5');
+          assert(data.rows[0].imageId, 'the first row should carry one');
+          assert(!data.rows[9].imageId, 'a row with no picture should carry an empty id');
+          return withImage.length + ' rows carry a picture id';
+        });
+      });
+    })
+
+    .then(function () {
+      return check('the worker serves a picture in parts that rebuild it exactly', function () {
+        return FYG.idb.run('images', 'readonly', function (store) { return store.getAll(); })
+          .then(function (stored) {
+            var wanted = stored[0];
+            return wanted.blob.arrayBuffer().then(function (buffer) {
+              var original = new Uint8Array(buffer);
+              var chunks = [];
+
+              function pull(part, total) {
+                if (total !== null && part >= total) return Promise.resolve();
+                return chrome.runtime.sendMessage({
+                  type: S.MSG.REQUEST_IMAGE, id: wanted.id, part: part
+                }).then(function (reply) {
+                  assert(reply && reply.ok, 'part ' + part + ' failed: ' + (reply && reply.error));
+                  chunks.push(reply.data);
+                  return pull(part + 1, reply.parts);
+                });
+              }
+
+              return pull(0, null).then(function () {
+                var rebuilt = U.base64ToBytes(chunks.join(''));
+                assert(rebuilt.length === original.length,
+                  'rebuilt ' + rebuilt.length + ' bytes from ' + original.length);
+                // An exact identity check, not a spot check.
+                assert(FYG.zip.crc32(rebuilt) === FYG.zip.crc32(original),
+                  'the rebuilt picture does not match the stored one');
+                return rebuilt.length + ' bytes rebuilt, checksum matches';
+              });
+            });
+          });
+      });
+    })
+
+    .then(function () {
+      return check('an unknown picture is refused with a readable reason', function () {
+        return chrome.runtime.sendMessage({
+          type: S.MSG.REQUEST_IMAGE, id: 'xl/media/not-in-this-catalog.png', part: 0
+        }).then(function (reply) {
+          assert(reply && reply.ok === false, 'an unknown id should be refused');
+          assert(/not in this catalog/i.test(reply.error), 'unhelpful message: ' + reply.error);
+          return reply.error;
+        });
+      });
+    })
+
+    .then(function () {
+      return check('rows sharing a picture cost one fetch, not one each', function () {
+        // Rows 2 and 3 of the fixture share an image, as 80 rows do in the real
+        // catalog. Refetching per row would move gigabytes for no reason.
+        return readState().then(function (data) {
+          var shared = data.rows[0].imageId;
+          assert(shared, 'the first row should carry a picture');
+
+          FYG.assets.clear();
+          var asks = 0;
+          var realSend = chrome.runtime.sendMessage;
+          chrome.runtime.sendMessage = function (message) {
+            if (message && message.type === S.MSG.REQUEST_IMAGE && message.part === 0) asks++;
+            return realSend.apply(this, arguments);
+          };
+
+          var wanted = [];
+          for (var i = 0; i < 30; i++) wanted.push(shared);
+
+          return Promise.all(wanted.map(function (id) { return FYG.assets.fetchImage(id); }))
+            .then(function (files) {
+              chrome.runtime.sendMessage = realSend;
+              assert(files.length === 30, 'expected 30 files');
+              assert(files[0] instanceof File, 'a real File should come back');
+              assert(files[0].size > 0, 'the file is empty');
+              assert(asks === 1, 'the picture was fetched ' + asks + ' times, expected once');
+              assert(FYG.assets.stats().entries <= FYG.assets.MAX_ENTRIES, 'the cache grew past its cap');
+              return '30 rows, 1 fetch, ' + files[0].size + ' bytes';
+            })
+            .catch(function (err) {
+              chrome.runtime.sendMessage = realSend;
+              throw err;
+            });
+        });
+      });
+    })
+
+    .then(function () {
       return check('a code that already exists skips the row instead of stopping the run', function () {
         var complaint = 'This code is already in use by another product or version';
         var notificationsBefore = recorded.notifications.length;
@@ -463,6 +583,10 @@
             .then(function () { return askForJob('productAdd'); })
             .then(function (job) {
               assert(job.act === 'run', 'expected the product form step, got "' + job.act + '"');
+              // The form step is the only one that needs a picture, so this is
+              // where the id has to have arrived.
+              assert(job.row.imageId === before.rows[at].imageId,
+                'the job carries "' + job.row.imageId + '" but the row has "' + before.rows[at].imageId + '"');
               return finishStep(job.step, { duplicate: complaint });
             })
             .then(readState)
@@ -914,6 +1038,21 @@
       ? failed.length + ' of ' + results.length + ' checks FAILED'
       : 'All ' + results.length + ' checks passed';
     document.title = (failed.length ? 'FAIL ' + failed.length + '/' : 'PASS 0/') + results.length;
+    // Report back to the test runner. The pages are driven in real time rather
+    // than under a virtual clock, because Chrome's virtual time fast forwards
+    // past IndexedDB completion callbacks whenever the page looks idle, which
+    // left transactions hanging for ever.
+    if (location.protocol.indexOf('http') === 0) {
+      fetch('/__result', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: document.title,
+          failures: results.filter(function (r) { return !r.ok; })
+            .map(function (r) { return r.name + ' -- ' + r.detail; })
+        })
+      }).catch(function () {});
+    }
+
 
     var list = document.getElementById('reportResults');
     list.innerHTML = '';

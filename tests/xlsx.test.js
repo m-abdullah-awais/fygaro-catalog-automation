@@ -349,6 +349,21 @@
       ? failed.length + ' of ' + results.length + ' checks FAILED'
       : 'All ' + results.length + ' checks passed';
     document.title = (failed.length ? 'FAIL ' + failed.length + '/' : 'PASS 0/') + results.length;
+    // Report back to the test runner. The pages are driven in real time rather
+    // than under a virtual clock, because Chrome's virtual time fast forwards
+    // past IndexedDB completion callbacks whenever the page looks idle, which
+    // left transactions hanging for ever.
+    if (location.protocol.indexOf('http') === 0) {
+      fetch('/__result', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: document.title,
+          failures: results.filter(function (r) { return !r.ok; })
+            .map(function (r) { return r.name + ' -- ' + r.detail; })
+        })
+      }).catch(function () {});
+    }
+
 
     var list = document.getElementById('results');
     list.innerHTML = '';

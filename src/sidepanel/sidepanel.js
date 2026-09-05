@@ -39,6 +39,9 @@
   /* Where the reason goes for a row that finished without a link. */
   var noteColumn = '';
 
+  /* Row to picture map for the loaded sheet, from FYG.xlsx.readImages. */
+  var imageIndex = null;
+
   var view = { run: S.defaultRun(), rows: [], log: [] };
   var filter = 'all';
   var searchTerm = '';
@@ -59,41 +62,80 @@
 
   /* ------------------------------------------------------- workbook storage */
 
-  function bytesToBase64(bytes) {
-    var chunk = 0x8000;
-    var parts = [];
-    for (var i = 0; i < bytes.length; i += chunk) {
-      parts.push(String.fromCharCode.apply(null, bytes.subarray(i, i + chunk)));
-    }
-    return btoa(parts.join(''));
-  }
-
-  function base64ToBytes(b64) {
-    var binary = atob(b64);
-    var out = new Uint8Array(binary.length);
-    for (var i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
-    return out;
-  }
-
+  /*
+   * The workbook goes to IndexedDB, not chrome.storage.
+   *
+   * chrome.storage.local is capped at 10 MB and this catalog is 63.5 MB, which
+   * base64 would inflate to about 85 MB. The old code did exactly that and its
+   * failure was only a warning, so the panel silently lost the ability to export
+   * an xlsx the first time it was closed.
+   */
   function storeWorkbook(name, bytes) {
-    var payload = {};
-    payload[S.KEY_FILE] = { name: name, data: bytesToBase64(bytes) };
-    return chrome.storage.local.set(payload).catch(function (err) {
+    return FYG.idb.run('workbook', 'readwrite', function (store) {
+      store.put(new Blob([bytes]), 'bytes');
+      return store.put({ name: name, size: bytes.length, savedAt: Date.now() }, 'meta');
+    }).catch(function (err) {
       // Not fatal: the run still works, only the xlsx export needs the file back.
       note('warn', 'The catalog file could not be cached: ' + err.message);
     });
   }
 
   function restoreWorkbook() {
-    return chrome.storage.local.get(S.KEY_FILE).then(function (data) {
-      var saved = data[S.KEY_FILE];
-      if (!saved || !saved.data) return null;
-      return X.load(base64ToBytes(saved.data)).then(function (wb) {
+    var meta = null;
+    return FYG.idb.run('workbook', 'readonly', function (store) {
+      return store.get('meta');
+    }).then(function (found) {
+      meta = found;
+      if (!meta) return null;
+      return FYG.idb.run('workbook', 'readonly', function (store) {
+        return store.get('bytes');
+      });
+    }).then(function (blob) {
+      if (!blob) return null;
+      return blob.arrayBuffer();
+    }).then(function (buffer) {
+      if (!buffer) return null;
+      return X.load(new Uint8Array(buffer)).then(function (wb) {
         workbook = wb;
-        fileName = saved.name;
+        fileName = meta.name;
         return wb;
       });
     }).catch(function () { return null; });
+  }
+
+  /**
+   * Writes the pictures, one transaction each.
+   *
+   * The store is emptied first. Picture ids are part paths such as
+   * xl/media/image8.png, which every workbook has, so a stale picture from a
+   * previously loaded catalog could otherwise be attached to the wrong product.
+   * Given the whole point of this extension is not creating the wrong record,
+   * that is worth a deliberate wipe.
+   */
+  function storeImages(found) {
+    var images = [];
+    found.images.forEach(function (img) { images.push(img); });
+    if (!images.length) return Promise.resolve(0);
+
+    return FYG.idb.clearStore('images').then(function () {
+      return images.reduce(function (chain, img, at) {
+        return chain.then(function () {
+          $('fileSummary').textContent = 'Storing image ' + (at + 1) + ' of ' + images.length + '...';
+          return FYG.idb.run('images', 'readwrite', function (store) {
+            return store.put({
+              id: img.id, name: img.name, type: img.type, size: img.size,
+              blob: new Blob([img.bytes], { type: img.type })
+            }, img.id);
+          });
+        });
+      }, Promise.resolve());
+    }).then(function () {
+      return images.length;
+    }).catch(function (err) {
+      note('warn', 'The product images could not be stored: ' + err.message +
+        ' The run will create products without them.');
+      return 0;
+    });
   }
 
   function note(level, message) {
@@ -102,79 +144,31 @@
 
   /* ---------------------------------------------------------- file handles */
 
-  var HANDLE_DB = 'fygaro-file';
-  var HANDLE_STORE = 'handles';
-
-  function openHandleDb() {
-    return new Promise(function (resolve, reject) {
-      // IndexedDB is absent in some contexts, a file:// page among them.
-      if (typeof indexedDB === 'undefined' || !indexedDB) {
-        reject(new Error('IndexedDB is not available here.'));
-        return;
-      }
-      var request;
-      try {
-        request = indexedDB.open(HANDLE_DB, 1);
-      } catch (err) {
-        reject(err);
-        return;
-      }
-      request.onupgradeneeded = function () {
-        if (!request.result.objectStoreNames.contains(HANDLE_STORE)) {
-          request.result.createObjectStore(HANDLE_STORE);
-        }
-      };
-      request.onsuccess = function () { resolve(request.result); };
-      request.onerror = function () { reject(request.error || new Error('IndexedDB could not be opened.')); };
-      request.onblocked = function () { reject(new Error('IndexedDB is blocked by another tab.')); };
-    });
-  }
-
-  /**
-   * Every path here is time limited. Remembering a file handle is a convenience,
-   * so if the database misbehaves the panel must carry on rather than sit
-   * waiting for an event that may never arrive.
-   */
-  function handleStore(mode, action) {
-    var work = openHandleDb().then(function (db) {
-      return new Promise(function (resolve, reject) {
-        var request;
-        try {
-          var tx = db.transaction(HANDLE_STORE, mode);
-          request = action(tx.objectStore(HANDLE_STORE));
-          tx.oncomplete = function () { db.close(); resolve(request ? request.result : undefined); };
-          tx.onerror = function () { db.close(); reject(tx.error); };
-          tx.onabort = function () { db.close(); reject(tx.error || new Error('The write was aborted.')); };
-        } catch (err) {
-          db.close();
-          reject(err);
-        }
-      });
-    });
-
-    var timeout = new Promise(function (resolve, reject) {
-      setTimeout(function () { reject(new Error('IndexedDB did not respond.')); }, 3000);
-    });
-    return Promise.race([work, timeout]);
-  }
-
   function rememberHandle(handle) {
     fileHandle = handle;
     if (!handle) return Promise.resolve();
-    return handleStore('readwrite', function (store) { return store.put(handle, 'workbook'); })
-      .catch(function () { /* the run still works, only in place saving needs it */ });
+    return FYG.idb.run('handles', 'readwrite', function (store) {
+      return store.put(handle, 'workbook');
+    }).catch(function () { /* the run still works, only in place saving needs it */ });
   }
 
   function forgetHandle() {
     fileHandle = null;
-    return handleStore('readwrite', function (store) { return store.delete('workbook'); })
-      .catch(function () {});
+    return FYG.idb.run('handles', 'readwrite', function (store) {
+      return store.delete('workbook');
+    }).catch(function () {});
   }
 
   function restoreHandle() {
-    return handleStore('readonly', function (store) { return store.get('workbook'); })
-      .then(function (handle) { fileHandle = handle || null; return fileHandle; })
-      .catch(function () { return null; });
+    return FYG.idb.run('handles', 'readonly', function (store) {
+      return store.get('workbook');
+    }).then(function (handle) {
+      // Only adopt the remembered handle if none has been chosen in the
+      // meantime. Reading it back takes a moment, and a user who picks a file
+      // straight away must not have it quietly replaced by the previous one.
+      if (!fileHandle) fileHandle = handle || null;
+      return fileHandle;
+    }).catch(function () { return null; });
   }
 
   function canPickHandles() {
@@ -219,6 +213,20 @@
       select.appendChild(option);
     }
     select.value = value || '';
+  }
+
+  /**
+   * Reads the pictures for a sheet, and treats any failure as "this sheet has
+   * none". A drawing this reader cannot follow must not stop the catalog from
+   * loading, because the products still matter more than their photos.
+   */
+  function readImagesSafely(name) {
+    try {
+      return X.readImages(workbook, name);
+    } catch (err) {
+      note('warn', 'The product images could not be read: ' + err.message);
+      return { byRow: new Map(), images: new Map(), anchors: 0, skipped: [] };
+    }
   }
 
   function pickSheet(wb) {
@@ -274,8 +282,14 @@
       var parsed = FYG.price.parse(priceRaw);
       if (!parsed.ok && !link) problems++;
 
+      var pictures = imageIndex ? imageIndex.byRow.get(r.r) : null;
+
       rows.push({
         sheetRow: r.r,
+        // Only the first. Every one of the 1030 rows that has a picture has
+        // exactly one, and keeping this a plain string keeps the row table and
+        // every message that carries it small.
+        imageId: (pictures && pictures[0]) || '',
         name: name,
         code: code,
         priceRaw: priceRaw,
@@ -335,6 +349,14 @@
     }
     $('fileSummary').textContent = summary + '.';
 
+    // One line about the pictures rather than a warning per row. Well over a
+    // thousand rows have none, and saying so each time would bury the log.
+    var withImages = built.rows.filter(function (r) { return r.imageId; }).length;
+    if (imageIndex && imageIndex.images.size) {
+      $('fileSummary').textContent += ' ' + withImages + ' row' + (withImages === 1 ? '' : 's') +
+        ' have a picture, ' + (built.rows.length - withImages) + ' will be created without one.';
+    }
+
     return send(S.MSG.LOAD_CATALOG, {
       file: {
         name: fileName,
@@ -354,6 +376,7 @@
   function loadSheet(name) {
     sheetData = workbook.readSheet(name);
     headerInfo = X.readHeader(sheetData);
+    imageIndex = readImagesSafely(name);
 
     var detected = {
       name: X.findColumn(headerInfo, S.HEADERS.name),
@@ -384,7 +407,11 @@
     setHidden($('fileEmpty'), true);
     setHidden($('fileLoaded'), false);
     setHidden($('btnChangeFile'), false);
-    return applyMapping();
+
+    // Storing the pictures blocks the catalog being ready on purpose. Start
+    // needs the first picture immediately, and this is a one time cost on a
+    // load that already takes a few seconds.
+    return storeImages(imageIndex).then(applyMapping);
   }
 
   /**
@@ -1085,7 +1112,13 @@
       setHidden($('btnChangeFile'), true);
 
       // Forgetting the handle is a convenience and must not hold up the clear.
+      // The workbook and its pictures are 130 MB between them and live outside
+      // chrome.storage, so clearing that alone would leave them on disk while
+      // telling the user everything had gone.
       forgetHandle();
+      FYG.idb.clearStore('workbook');
+      FYG.idb.clearStore('images');
+      imageIndex = null;
       send(S.MSG.RESET).then(refresh);
     });
 
@@ -1127,6 +1160,12 @@
   /* -------------------------------------------------------------------- boot */
 
   wire();
+
+  // Paint from chrome.storage before touching IndexedDB. Reading a 63.5 MB
+  // workbook back takes a moment, and the panel should show the run it already
+  // knows about rather than sitting blank until a database answers.
+  refresh();
+
   // The file handle comes back first, so the panel knows straight away whether
   // updating the original file is possible for the workbook it is about to load.
   restoreHandle()

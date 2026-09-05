@@ -9,7 +9,7 @@
  */
 'use strict';
 
-importScripts('../shared/util.js', '../shared/state.js');
+importScripts('../shared/util.js', '../shared/state.js', '../shared/idb.js');
 
 var FYG = self.FYG;
 var S = FYG.state;
@@ -255,6 +255,7 @@ handlers[S.MSG.LOAD_CATALOG] = function (msg, bucket) {
       priceRaw: r.priceRaw,
       priceText: r.priceText,
       link: r.link || '',
+      imageId: r.imageId || '',
       // A row that already carries a link is left alone, which is what makes a
       // restart safe. A row missing a name, code or readable price is marked
       // failed up front rather than breaking the run halfway through.
@@ -489,7 +490,8 @@ handlers[S.MSG.REQUEST_JOB] = function (msg, bucket, sender) {
       code: row.code,
       name: row.name,
       priceText: row.priceText,
-      productUuid: row.productUuid || ''
+      productUuid: row.productUuid || '',
+      imageId: row.imageId || ''
     }
   });
 };
@@ -517,7 +519,8 @@ handlers[S.MSG.STEP_DONE] = function (msg, bucket, sender) {
     run.finishedAt = Date.now();
     log(bucket, 'success',
       'Dry run complete. The product form is filled for row ' + row.sheetRow +
-      ' and was not saved. Check the values on screen, then turn Dry run off.' +
+      ' and was not saved.' + (msg.imageName ? ' Its picture ' + msg.imageName + ' is attached.' : '') +
+      ' Check the values on screen, then turn Dry run off.' +
       (msg.duplicate ? ' Note: Fygaro already reports that this code is taken (' +
         U.truncate(msg.duplicate, 100) + '), so a real run would skip this row.' : ''));
     bucket.logDirty = true;
@@ -541,6 +544,11 @@ handlers[S.MSG.STEP_DONE] = function (msg, bucket, sender) {
     return completeRowAndRestart(bucket, S.ROW.SKIPPED).then(function () {
       return { ok: true };
     });
+  }
+
+  if (msg.step === S.STEP.FILL_PRODUCT && msg.imageName) {
+    log(bucket, 'info', 'Row ' + row.sheetRow + ': attached ' + msg.imageName + '.');
+    bucket.logDirty = true;
   }
 
   if (msg.step === S.STEP.CAPTURE_LINK) {
@@ -622,7 +630,67 @@ chrome.tabs.onRemoved.addListener(function (tabId) {
 
 /* --------------------------------------------------------------- lifecycle */
 
+/*
+ * The last picture handed out, so the parts of one image are encoded once
+ * rather than once per chunk. One entry is enough: chunks of the same picture
+ * are always requested back to back.
+ */
+var lastImage = { id: '', base64: '', meta: null };
+
+/** Reads one product picture out of IndexedDB and returns one chunk of it. */
+function serveImage(msg) {
+  var id = String(msg.id || '');
+  var part = Math.max(0, parseInt(msg.part, 10) || 0);
+
+  var ready = (lastImage.id === id && lastImage.meta)
+    ? Promise.resolve(lastImage)
+    : FYG.idb.run('images', 'readonly', function (store) {
+      return store.get(id);
+    }).then(function (record) {
+      if (!record || !record.blob) {
+        throw new Error('That picture is not in this catalog. Load the file again.');
+      }
+      return record.blob.arrayBuffer().then(function (buffer) {
+        lastImage = {
+          id: id,
+          base64: U.bytesToBase64(new Uint8Array(buffer)),
+          meta: { name: record.name, type: record.type, size: record.size }
+        };
+        return lastImage;
+      });
+    });
+
+  return ready.then(function (held) {
+    var chunk = Math.ceil(S.IMAGE_CHUNK_BYTES * 4 / 3);
+    var parts = Math.max(1, Math.ceil(held.base64.length / chunk));
+    if (part >= parts) throw new Error('Asked for part ' + part + ' of ' + parts + '.');
+    return {
+      ok: true,
+      id: id,
+      name: held.meta.name,
+      type: held.meta.type,
+      size: held.meta.size,
+      parts: parts,
+      part: part,
+      data: held.base64.slice(part * chunk, (part + 1) * chunk)
+    };
+  });
+}
+
 chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
+  /*
+   * Handled before the serial queue on purpose. Every other message reads and
+   * rewrites the whole run, and a picture arriving in five parts would put the
+   * run loop behind five of those for no reason, since serving bytes changes
+   * nothing.
+   */
+  if (msg && msg.type === S.MSG.REQUEST_IMAGE) {
+    serveImage(msg).then(sendResponse, function (err) {
+      sendResponse({ ok: false, error: String(err && err.message ? err.message : err) });
+    });
+    return true;
+  }
+
   var handler = msg && handlers[msg.type];
   if (!handler) return false;
 

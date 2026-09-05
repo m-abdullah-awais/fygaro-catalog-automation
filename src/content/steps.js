@@ -303,6 +303,67 @@
   }
 
   /**
+   * Waits for a sign that the page took the file.
+   *
+   * Either the input still holds it, which is what a form that posts the file on
+   * Save looks like, or something appeared in the Gallery panel, which is what
+   * an upload on selection looks like. Neither is guaranteed, so failing to see
+   * either is a shrug rather than an error: the file was demonstrably handed
+   * over, and refusing to save would strand a row that is probably fine.
+   */
+  function waitForGalleryReady(input, settings) {
+    var panel = input.closest ? input.closest('fieldset') : null;
+    return D.waitFor(function () {
+      if (input.files && input.files.length) return 'held';
+      if (panel && panel.querySelector('img, progress, [style*="background-image"]')) return 'shown';
+      return null;
+    }, Math.min(settings.stepTimeoutMs, 8000), 'the Gallery to accept the picture')
+      .catch(function () { return 'unconfirmed'; });
+  }
+
+  /**
+   * Puts this row's picture into the Gallery field, if it has one.
+   *
+   * A row with no picture is not a problem and says nothing: well over a
+   * thousand of them have none, so complaining each time would bury the log. A
+   * Gallery field that has gone missing IS a problem, because quietly creating
+   * hundreds of products without their photos is worse than stopping.
+   *
+   * @returns {Promise<string>} the file name attached, or ''
+   */
+  function attachGalleryImage(job) {
+    var row = job.row;
+    var settings = job.settings;
+    if (!row.imageId) return Promise.resolve('');
+
+    var input = locate.galleryInput();
+    if (!input) fail('Row ' + row.sheetRow + ' has a picture but the Gallery field was not found on the ' +
+      'item form. Nothing was saved.');
+
+    return FYG.assets.fetchImage(row.imageId).then(function (file) {
+      D.reveal(input);
+
+      // Setting the input is how the picker does it. Dropping on the box is the
+      // fallback for a widget that only listens for a drop.
+      var ok = D.setFiles(input, [file]);
+      if (!ok) ok = D.dropFiles(input.closest('label') || input.parentElement, [file]);
+      if (!ok) {
+        fail('The picture ' + file.name + ' would not attach to the Gallery field. It was set on the ' +
+          'file input and dropped on its box, and neither took.');
+      }
+
+      // The fields were written before this. An upload widget that re-renders
+      // its part of the form must not have thrown them away.
+      var nameInput = D.control('input[name="name"]');
+      if (nameInput && U.foldText(nameInput.value) !== U.foldText(row.name)) {
+        fail('Attaching the picture cleared the Name field, so the item would have saved wrong.');
+      }
+
+      return waitForGalleryReady(input, settings).then(function () { return file.name; });
+    });
+  }
+
+  /**
    * Picks an option by its visible label, falling back to a known value.
    * Reading the label first survives Fygaro renumbering its option values, and
    * the fallback covers a relabelled interface.
@@ -368,6 +429,7 @@
   STEPS[S.STEP.FILL_PRODUCT] = function (job) {
     var row = job.row;
     var settings = job.settings;
+    var imageName = '';
 
     return D.waitForControl('input[name="name"]', settings.stepTimeoutMs, 'the new item form')
       .then(function () { return pause(settings); })
@@ -391,15 +453,28 @@
         return pause(settings);
       })
       .then(function () {
+        // After the fields, not before. If the picture uploads on selection this
+        // gives it the least time to finish, but if the widget re-renders on
+        // arrival it cannot silently wipe values typed after it. A slow upload
+        // is recoverable; an item saved with the wrong name is not.
+        return attachGalleryImage(job);
+      })
+      .then(function (attached) {
+        imageName = attached;
+        return pause(settings);
+      })
+      .then(function () {
         // A dry run stops with the form filled, so nothing is ever created. The
         // Code is still inspected, because Fygaro may have checked it when the
         // field lost focus, and knowing early is useful. It is only reported.
-        if (settings.dryRun) return { dryRun: true, duplicate: locate.duplicateCodeError() };
+        if (settings.dryRun) {
+          return { dryRun: true, imageName: imageName, duplicate: locate.duplicateCodeError() };
+        }
 
         // Fygaro can refuse the Code before Save is ever pressed. Nothing has
         // been created in that case, so the row is reported without saving.
         var already = locate.duplicateCodeError();
-        if (already) return { duplicate: already };
+        if (already) return { duplicate: already, imageName: imageName };
 
         var save = locate.saveButton();
         if (!save) fail('The Save button was not found on the item form.');
@@ -407,9 +482,10 @@
         D.click(save);
         return waitForSaveOutcome(['productList', 'productDetail'], settings.stepTimeoutMs, 'Saving the item')
           .then(function (outcome) {
-            if (outcome.duplicate) return { duplicate: outcome.duplicate };
+            if (outcome.duplicate) return { duplicate: outcome.duplicate, imageName: imageName };
             return {
               landedRoute: outcome.landedRoute,
+              imageName: imageName,
               productUuid: outcome.landedRoute === 'productDetail' ? U.extractUuid(location.pathname) : ''
             };
           });
