@@ -2,7 +2,7 @@
  * Fygaro Catalog Automation
  * Price parser tests. Zero dependencies, run with:  node --test tests/
  *
- * The fixture holds all 699 "Precio Total" values taken straight out of the real
+ * The fixture holds all 2073 "Precio Total" values taken straight out of the real
  * workbook, with expected results produced by a separate reference
  * implementation, so this is a real cross check and not a snapshot of itself.
  */
@@ -21,7 +21,7 @@ const price = globalThis.FYG.price;
 const cases = JSON.parse(readFileSync(join(here, 'fixtures', 'prices.json'), 'utf8'));
 
 test('fixture covers the whole catalog', () => {
-  assert.equal(cases.length, 699);
+  assert.equal(cases.length, 2073);
 });
 
 test('every real catalog price parses to the expected number', () => {

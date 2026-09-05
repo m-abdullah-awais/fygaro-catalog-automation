@@ -32,40 +32,88 @@
     return new RegExp('<c\\b[^>]*\\br="' + ref + '"[^>]*?(?:/>|>[\\s\\S]*?</c>)', flags || '');
   }
 
-  function rowRegex(rowNumber) {
-    return new RegExp('<row\\b[^>]*\\br="' + rowNumber + '"[^>]*?(?:/>|>[\\s\\S]*?</row>)');
-  }
-
-  /** Slow path used only when the target cell does not already exist. */
-  function insertCell(xml, column, rowNumber, value) {
-    var ref = column + rowNumber;
-    var newCell = buildCell(null, ref, value);
-    var targetIndex = X.colIndex(column);
-
-    var rowMatch = rowRegex(rowNumber).exec(xml);
-    if (rowMatch) {
-      var rowMarkup = rowMatch[0];
-      var updatedRow;
-      if (/\/>$/.test(rowMarkup)) {
-        // An empty self closing row has to become a container first.
-        updatedRow = rowMarkup.slice(0, -2) + '>' + newCell + '</row>';
+  /**
+   * Records where every row element starts and ends, in one pass.
+   *
+   * Locating rows by running a fresh regex over the whole sheet once per cell is
+   * quadratic. That costs nothing while the target cells already exist, and it
+   * is ruinous when they do not: writing a brand new column into the real
+   * catalog measured 15 seconds against 230 ms for a column that was already
+   * there. Everything is found in this single scan instead.
+   *
+   * @param {string} xml worksheet part, as text
+   * @returns {Map<number, {start: number, end: number}>}
+   */
+  X.indexRows = function (xml) {
+    var byRow = new Map();
+    var open = /<row\b[^>]*>/g;
+    var m;
+    while ((m = open.exec(xml)) !== null) {
+      var tag = m[0];
+      var num = /\br="(\d+)"/.exec(tag);
+      if (!num) continue;
+      var end;
+      if (tag.charAt(tag.length - 2) === '/') {
+        end = m.index + tag.length;
       } else {
-        var bodyStart = rowMarkup.indexOf('>') + 1;
-        var head = rowMarkup.slice(0, bodyStart);
-        var body = rowMarkup.slice(bodyStart, rowMarkup.length - '</row>'.length);
-        var insertAt = body.length;
-        var scan = /<c\b[^>]*\br="([A-Z]+)\d+"/g;
-        var found;
-        while ((found = scan.exec(body)) !== null) {
-          if (X.colIndex(found[1]) > targetIndex) { insertAt = found.index; break; }
-        }
-        updatedRow = head + body.slice(0, insertAt) + newCell + body.slice(insertAt) + '</row>';
+        var close = xml.indexOf('</row>', m.index + tag.length);
+        if (close === -1) continue;
+        end = close + '</row>'.length;
       }
-      return xml.slice(0, rowMatch.index) + updatedRow + xml.slice(rowMatch.index + rowMarkup.length);
+      byRow.set(parseInt(num[1], 10), { start: m.index, end: end });
+      // Rows never nest, so the body is skipped wholesale, which is what keeps
+      // this linear in the size of the sheet.
+      open.lastIndex = end;
+    }
+    return byRow;
+  };
+
+  /**
+   * Returns one row element with the target cell written into it: replaced when
+   * the cell is already there, inserted in column order when it is not.
+   *
+   * A cell that has to be created copies the style of the nearest cell to its
+   * left, so a brand new column matches the sheet it is joining rather than
+   * arriving unformatted beside a fully styled table.
+   */
+  function writeCellIntoRow(rowMarkup, column, rowNumber, value) {
+    var ref = column + rowNumber;
+
+    // Every cell inside one row ends with that row number, so this cannot
+    // collide with a longer reference such as I10 while patching row 1.
+    var existing = cellRegex(ref).exec(rowMarkup);
+    if (existing) {
+      return rowMarkup.slice(0, existing.index) +
+        buildCell(existing[0], ref, value) +
+        rowMarkup.slice(existing.index + existing[0].length);
     }
 
-    // The row itself is missing, so create it in row order.
-    var newRow = '<row r="' + rowNumber + '">' + newCell + '</row>';
+    if (/\/>$/.test(rowMarkup)) {
+      // An empty self closing row has to become a container first.
+      return rowMarkup.slice(0, -2) + '>' + buildCell(null, ref, value) + '</row>';
+    }
+
+    var targetIndex = X.colIndex(column);
+    var bodyStart = rowMarkup.indexOf('>') + 1;
+    var head = rowMarkup.slice(0, bodyStart);
+    var body = rowMarkup.slice(bodyStart, rowMarkup.length - '</row>'.length);
+
+    var insertAt = body.length;
+    var neighbour = null;
+    var scan = /<c\b[^>]*\br="([A-Z]+)\d+"[^>]*?(?:\/>|>)/g;
+    var found;
+    while ((found = scan.exec(body)) !== null) {
+      if (X.colIndex(found[1]) > targetIndex) { insertAt = found.index; break; }
+      neighbour = found[0];
+    }
+
+    return head + body.slice(0, insertAt) + buildCell(neighbour, ref, value) +
+      body.slice(insertAt) + '</row>';
+  }
+
+  /** Slow path used only when the sheet has no row element at all for a number. */
+  function insertRow(xml, column, rowNumber, value) {
+    var newRow = '<row r="' + rowNumber + '">' + buildCell(null, column + rowNumber, value) + '</row>';
     var rowScan = /<row\b[^>]*\br="(\d+)"/g;
     var hit;
     while ((hit = rowScan.exec(xml)) !== null) {
@@ -87,31 +135,59 @@
    * @returns {string} the patched XML
    */
   X.patchSheetXml = function (xml, column, updates) {
-    var sorted = updates.slice().sort(function (a, b) { return a.row - b.row; });
+    // Last write wins for a repeated row, so the forward pass stays monotonic.
+    var wanted = new Map();
+    updates.forEach(function (u) { wanted.set(u.row, u.value); });
+    var sorted = Array.from(wanted.keys()).sort(function (a, b) { return a - b; });
+
+    var index = X.indexRows(xml);
     var parts = [];
     var cursor = 0;
-    var missed = [];
+    var missingRows = [];
 
-    // Rows appear in ascending order, so one forward pass handles the normal
-    // case where every target cell already exists.
     for (var i = 0; i < sorted.length; i++) {
-      var u = sorted[i];
-      var ref = column + u.row;
-      var re = cellRegex(ref, 'g');
-      re.lastIndex = cursor;
-      var m = re.exec(xml);
-      if (!m) { missed.push(u); continue; }
-      parts.push(xml.slice(cursor, m.index));
-      parts.push(buildCell(m[0], ref, u.value));
-      cursor = m.index + m[0].length;
+      var number = sorted[i];
+      var slot = index.get(number);
+      if (!slot) { missingRows.push(number); continue; }
+      parts.push(xml.slice(cursor, slot.start));
+      parts.push(writeCellIntoRow(xml.slice(slot.start, slot.end), column, number, wanted.get(number)));
+      cursor = slot.end;
     }
     parts.push(xml.slice(cursor));
 
     var result = parts.join('');
-    for (var j = 0; j < missed.length; j++) {
-      result = insertCell(result, column, missed[j].row, missed[j].value);
+    for (var j = 0; j < missingRows.length; j++) {
+      result = insertRow(result, column, missingRows[j], wanted.get(missingRows[j]));
     }
     return result;
+  };
+
+  /**
+   * Applies several column batches, then rebuilds the file once.
+   * @param {object} wb workbook handle from FYG.xlsx.load
+   * @param {string} sheetName
+   * @param {Array<{column: string, updates: Array<{row: number, value: string}>}>} batches
+   * @returns {Promise<Blob>}
+   */
+  X.writeColumns = function (wb, sheetName, batches) {
+    return Promise.resolve().then(function () {
+      var sheet = wb.findSheet(sheetName);
+      if (!sheet) throw new Error('Sheet "' + sheetName + '" was not found in this workbook.');
+      var bytes = wb.files.get(sheet.path);
+      if (!bytes) throw new Error('Sheet part "' + sheet.path + '" is missing from the file.');
+
+      var xml = new TextDecoder('utf-8').decode(bytes);
+      (batches || []).forEach(function (batch) {
+        if (!batch || !batch.column || !batch.updates || !batch.updates.length) return;
+        xml = X.patchSheetXml(xml, batch.column, batch.updates);
+      });
+
+      // Write into a copy of the file table so the loaded workbook stays intact
+      // and the user can export again after more rows finish.
+      var files = new Map(wb.files);
+      files.set(sheet.path, new TextEncoder().encode(xml));
+      return FYG.zip.write(wb.order, files);
+    });
   };
 
   /**
@@ -124,21 +200,7 @@
    * @returns {Promise<Blob>}
    */
   X.writeColumn = function (wb, sheetName, column, updates) {
-    return Promise.resolve().then(function () {
-      var sheet = wb.findSheet(sheetName);
-      if (!sheet) throw new Error('Sheet "' + sheetName + '" was not found in this workbook.');
-      var bytes = wb.files.get(sheet.path);
-      if (!bytes) throw new Error('Sheet part "' + sheet.path + '" is missing from the file.');
-
-      var xml = new TextDecoder('utf-8').decode(bytes);
-      var patched = X.patchSheetXml(xml, column, updates);
-
-      // Write into a copy of the file table so the loaded workbook stays intact
-      // and the user can export again after more rows finish.
-      var files = new Map(wb.files);
-      files.set(sheet.path, new TextEncoder().encode(patched));
-      return FYG.zip.write(wb.order, files);
-    });
+    return X.writeColumns(wb, sheetName, [{ column: column, updates: updates }]);
   };
 
   /** Builds the download name for the patched workbook. */
