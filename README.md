@@ -3,8 +3,8 @@
 A Chrome extension that turns a spreadsheet catalog into Fygaro products and payment links, then writes
 every generated link back into the spreadsheet next to the row it came from.
 
-The catalog behind this project holds 699 services. Creating each one by hand means repeating a seven page
-workflow 699 times. This extension performs that loop inside your own signed in browser session, with live
+The catalog behind this project holds 2073 services, most of them with a product photo. Creating each one
+by hand means repeating a seven page workflow 2073 times. This extension performs that loop inside your own signed in browser session, with live
 progress, pause and resume, and a patched spreadsheet at the end.
 
 ---
@@ -17,6 +17,7 @@ progress, pause and resume, and a patched spreadsheet at the end.
 - [Using it](#using-it)
 - [Your spreadsheet](#your-spreadsheet)
 - [Settings](#settings)
+- [Products that already exist](#products-that-already-exist)
 - [When something goes wrong](#when-something-goes-wrong)
 - [Exporting](#exporting)
 - [Starting over](#starting-over)
@@ -87,7 +88,8 @@ plain JavaScript, and the spreadsheet is read and written using the browser's ow
    corner of the Fygaro page. You can carry on using other tabs, but leave the Fygaro tab open.
 5. **Export** when you are ready. You do not have to wait for the whole run.
 
-A run of 699 rows takes several hours. You do not have to sit through it: progress is written to disk after
+A run of 2073 rows takes many hours, so the Catalog card lets you set a row range and work through it in
+batches. A run of that size takes tens of hours end to end. You do not have to sit through it: progress is written to disk after
 every step, so you can pause, stop, close the panel, or even restart the browser and pick up where you
 left off. Rows that already have a link are skipped, which is what makes resuming safe.
 
@@ -102,11 +104,23 @@ The extension reads these columns and writes back to one of them:
 | C | `Código` | The product **Code**, and the **Name** of the Fygaro Link |
 | D | `Servicios` | The product **Name** |
 | E | `Precio Total` | The product **Price** |
-| H | `Link` | Where the generated link is written |
+| H | `Columna 1` | The product **photo**, read but never written to |
+| I | `Link` | Where the generated link is written. Created if it does not exist |
+| J | `Nota` | Why a row finished without a link. Created if it does not exist |
 
 Header names are matched ignoring case and accents, and each has accepted alternatives, so `Codigo`,
 `Code`, `Precio` and `Price` all resolve. If a header is renamed beyond recognition you can map the columns
 by hand in the panel.
+
+**There is no Link column in the current catalog**, so the extension proposes one just past everything the
+sheet uses, shows it in the Link dropdown labelled as new, and writes the `Link` header itself on export.
+That header is one of the spellings it looks for, so the next run finds column I normally and skips the
+rows that are already done. Column H holds the photos and is never written to.
+
+**Photos.** Pictures anchored in column H are uploaded to the product's Gallery. A row without one is
+created normally. Of the 2073 rows, 1030 carry a picture and 1043 do not, and although the whole pipeline
+handles several per row, no row in this catalog has more than one. Only 35 distinct images are shared
+across those 1030 rows, so each is held once rather than once per row.
 
 **Prices.** The catalog mixes two number conventions in the same column and both are handled:
 
@@ -120,8 +134,12 @@ by hand in the panel.
 When both a dot and a comma appear, whichever comes last is treated as the decimal point. Fygaro receives
 a plain `1125.00` style value.
 
-Rows missing a name, missing a code, or carrying a price that cannot be read are flagged before the run
-starts and marked Failed, rather than breaking the run halfway through.
+Rows missing a name, missing a code, carrying a price that cannot be read, or priced at zero are flagged
+before the run starts and marked Failed, rather than breaking the run halfway through. Their reason is
+written into the `Nota` column on export, so it is in the spreadsheet and not only in the panel.
+
+Rows outside the chosen row range are set aside as Skipped, not Failed. Nothing is wrong with them; they
+are simply not part of this batch.
 
 ---
 
@@ -149,6 +167,17 @@ applied.
 
 ---
 
+## Products that already exist
+
+If Fygaro refuses a Code because it is already in use, the row is skipped and the run carries on. It shows
+as **Exists** in the Results list, and the export writes `Ya existe en Fygaro` into the `Nota` column. No
+link is captured for it, and nothing about the existing product is changed.
+
+Reloading the catalog later brings such a row back as pending, and it will be detected and skipped again.
+That costs about a second rather than the forty seconds it used to take before this was recognised.
+
+---
+
 ## When something goes wrong
 
 The run pauses and asks you. It never guesses and never writes a link it is not sure about.
@@ -166,6 +195,11 @@ Everything captured so far stays saved, and you can export at any point.
 ---
 
 ## Exporting
+
+Links go into column `I`, and the reason a row finished without one goes into column `J`. Both headers are
+written on the first export if the sheet does not already have them. Column `H` and its photos are never
+touched, and the table definition is left exactly as it is, so Excel opens the result without offering to
+repair it.
 
 You choose where the links go:
 
@@ -301,19 +335,22 @@ npm run lint       # syntax, house rules, and manifest references
 
 | Suite | Checks | Covers |
 |-------|--------|--------|
-| `tests/price.test.mjs` | 9 | Every one of the 699 real prices, cross checked against a separate reference implementation |
+| `tests/price.test.mjs` | 9 | Every one of the 2073 real prices, cross checked against a separate reference implementation |
 | `tests/state.test.mjs` | 11 | Run state, routes, and that a run saved by an older version gains every setting added since |
-| `tests/xlsx.test.mjs` | 9 | ZIP round trips, style preservation, XML escaping, and that an unedited rewrite reproduces all 30 parts byte for byte |
-| `tests/selectors.test.html` | 38 | Every locator, run against the eight captured page snapshots, with Fygaro's checkbox styling reproduced |
-| `tests/xlsx.test.html` | 11 | Workbook reading, sheet and column detection, patch and re read |
-| `tests/integration.test.html` | 24 | The real side panel driving the real worker through a full run |
+| `tests/xlsx.test.mjs` | 14 | ZIP round trips, style preservation, XML escaping, writing a column the sheet has no cells for, and that an unedited rewrite reproduces all 66 parts byte for byte |
+| `tests/selectors.test.html` | 54 | Every locator, run against the nine captured page snapshots, with Fygaro's checkbox and file field styling reproduced |
+| `tests/xlsx.test.html` | 23 | Workbook reading, sheet and column detection, the drawing that anchors the photos, patch and re read |
+| `tests/integration.test.html` | 32 | The real side panel driving the real worker through a full run |
 
 The integration suite is the interesting one. It stubs the Chrome APIs, loads the actual worker and the
 actual panel, then plays a run through: 699 rows loaded, all seven steps walked for several rows, a failure
 retried then escalated, a row skipped, pause and resume, a stalled navigation escalated, a reload prompt
 declined without losing links, the page zoomed out before work begins and handed back on stop, zooming
 retried after a failure, a blank settings field keeping its default rather than inventing one, a dry run,
-an in place save checked cell by cell against a stand in file handle, a refused write permission that
+a row range that sets the rest of the sheet aside, a picture served to the page in parts and rebuilt with a
+matching checksum, thirty rows sharing one picture costing a single fetch, a duplicate code skipped without
+a retry or a notification, an in place save checked cell by cell against a stand in file handle, a refused
+write permission that
 changes nothing, and a Clear everything that empties storage and puts the panel back to its first run
 state.
 
