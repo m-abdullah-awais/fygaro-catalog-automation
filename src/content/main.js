@@ -152,7 +152,8 @@
           url: location.href,
           link: result.link || '',
           productUuid: result.productUuid || '',
-          landedRoute: result.landedRoute || ''
+          landedRoute: result.landedRoute || '',
+          duplicate: result.duplicate || ''
         });
       })
       .catch(function (err) {

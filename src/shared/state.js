@@ -39,6 +39,18 @@
     FAILED: 'failed'
   };
 
+  /*
+   * Why a row was skipped. Two quite different things share one status, and the
+   * reason is what lets the panel tell them apart without adding a sixth status
+   * that recount, the stat tiles, the filter chips and the CSS would all have to
+   * learn. Rows stored by an earlier build have no reason at all, which every
+   * reader treats as "not stated".
+   */
+  S.SKIP = {
+    HAD_LINK: 'hadLink',   // the sheet already carried a link for it
+    EXISTS: 'exists'       // Fygaro already has a product with that code
+  };
+
   S.STEP = {
     NAV_TO_PRODUCTS: 'NAV_TO_PRODUCTS',
     CLICK_CREATE: 'CLICK_CREATE',

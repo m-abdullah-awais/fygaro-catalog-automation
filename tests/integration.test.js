@@ -450,16 +450,83 @@
     })
 
     .then(function () {
+      return check('a code that already exists skips the row instead of stopping the run', function () {
+        var complaint = 'This code is already in use by another product or version';
+        var notificationsBefore = recorded.notifications.length;
+
+        return readState().then(function (before) {
+          var at = before.run.cursor;
+          return askForJob('dashboard')
+            .then(function (job) { return finishStep(job.step); })
+            .then(function () { return askForJob('productList'); })
+            .then(function (job) { return finishStep(job.step); })
+            .then(function () { return askForJob('productAdd'); })
+            .then(function (job) {
+              assert(job.act === 'run', 'expected the product form step, got "' + job.act + '"');
+              return finishStep(job.step, { duplicate: complaint });
+            })
+            .then(readState)
+            .then(function (after) {
+              var row = after.rows[at];
+              assert(row.status === S.ROW.SKIPPED, 'the row is "' + row.status + '", expected skipped');
+              assert(row.reason === S.SKIP.EXISTS, 'the reason is "' + row.reason + '"');
+              assert(/Ya existe en Fygaro/.test(row.error), 'unhelpful reason: ' + row.error);
+              assert(row.link === '', 'a skipped row must carry no link');
+
+              // The run has to keep going, not stop and wait for a person.
+              assert(after.run.status === S.STATUS.RUNNING,
+                'the run went to "' + after.run.status + '" instead of carrying on');
+              assert(after.run.pending === null, 'an attention prompt was raised');
+              assert(after.run.attempt === 0, 'the attempt counter moved to ' + after.run.attempt);
+              assert(after.run.cursor > at, 'the cursor stayed on the skipped row');
+              assert(after.run.step === S.STEP.NAV_TO_PRODUCTS,
+                'the next row should start from the dashboard, not ' + after.run.step);
+              assert(recorded.tabUpdates[recorded.tabUpdates.length - 1] === S.APP_URL,
+                'the browser was not sent back to the dashboard');
+
+              assert(after.run.stats.skipped === before.run.stats.skipped + 1,
+                'the skipped count did not move');
+              assert(after.run.stats.failed === before.run.stats.failed,
+                'a skipped row must not be counted as a failure');
+              assert(recorded.notifications.length === notificationsBefore,
+                'a duplicate must not raise a desktop notification');
+              return 'row skipped as "exists", run continued, no retry and no notification';
+            });
+        });
+      });
+    })
+
+    .then(function () {
+      return check('the panel labels an existing row differently from a plain skip', function () {
+        // The panel re-renders on its own when the worker broadcasts, so this
+        // waits for that rather than reaching into the panel to force it.
+        return waitUntil(function () {
+          return Array.prototype.map.call(
+            $('results').querySelectorAll('.badge span'),
+            function (el) { return el.textContent; }).indexOf('Exists') !== -1;
+        }, 'the row to be labelled Exists').then(function () {
+          var words = Array.prototype.map.call(
+            $('results').querySelectorAll('.badge span'), function (el) { return el.textContent; });
+          assert(words.indexOf('Failed') === -1, 'an existing row was shown as a failure');
+          return 'shown as Exists, not Skipped and not Failed';
+        });
+      });
+    })
+
+    .then(function () {
       return check('a second row runs and the cursor moves on', function () {
         var link = 'https://www.fygaro.com/en/pb/aaaaaaaa-2222-2222-2222-222222222222/';
         return playRow('aaaaaaaa-0000-0000-0000-000000000002', link).then(function () {
           return readState();
         }).then(function (data) {
           assert(data.run.stats.done === 2, 'done count is ' + data.run.stats.done);
-          assert(data.rows[0].status === S.ROW.DONE, 'row 2 should be done');
-          assert(data.rows[1].status === S.ROW.DONE, 'row 3 should be done');
-          assert(data.run.cursor === 2, 'the cursor is at ' + data.run.cursor + ', expected row 4');
-          return 'two rows done, cursor on the third';
+          assert(data.rows[0].status === S.ROW.DONE, 'the first row should be done');
+          // The second row was the one Fygaro already had, so the run moved past
+          // it and finished the third instead.
+          assert(data.rows[1].status === S.ROW.SKIPPED, 'the skipped row changed to ' + data.rows[1].status);
+          assert(data.rows[2].status === S.ROW.DONE, 'the third row should be done');
+          assert(data.run.cursor === 3, 'the cursor is at ' + data.run.cursor + ', expected the fourth row');
+          return 'two rows done either side of the skipped one';
         });
       });
     })

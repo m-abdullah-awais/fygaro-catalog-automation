@@ -269,6 +269,95 @@
       return D.describe(save);
     });
 
+    /* -------------------------------------------- step 3 duplicate code error */
+
+    var DUPLICATE_TEXT = 'This code is already in use by another product or version';
+
+    check('step 3: the duplicate code message is found on the rejected form', function () {
+      var scope = mount('duplicate-product-err');
+      assert(locate.duplicateCodeError(scope) === DUPLICATE_TEXT,
+        'got "' + locate.duplicateCodeError(scope) + '"');
+      return DUPLICATE_TEXT;
+    });
+
+    check('step 3: a clean form reports no duplicate', function () {
+      ['add', 'edit-product', 'link-add'].forEach(function (name) {
+        var scope = mount(name);
+        assert(locate.duplicateCodeError(scope) === '',
+          name + ' reported "' + locate.duplicateCodeError(scope) + '"');
+      });
+      return 'add, edit-product and link-add are all clean';
+    });
+
+    check('step 3: the message carries no class, role or aria clue at all', function () {
+      // This documents why the locator is shaped the way it is. Every obvious
+      // way of finding a validation message fails on this page.
+      var scope = mount('duplicate-product-err');
+      assert(scope.querySelector('[role="alert"]') === null, 'a role="alert" appeared');
+      assert(scope.querySelector('[aria-invalid]') === null, 'an aria-invalid appeared');
+      assert(D.all('[class*="error" i], [class*="invalid" i]', scope).length === 0,
+        'a class containing error or invalid appeared');
+      assert(locate.duplicateCodeError(scope) === DUPLICATE_TEXT, 'the locator should still find it');
+      return 'found by position, not by class';
+    });
+
+    check('step 3: the message is found even when it is not painted', function () {
+      var scope = mount('duplicate-product-err');
+      var input = D.control('input[name="code"]', scope);
+      var span = D.messagesFor(input).length ? input.closest('label').lastElementChild : null;
+      assert(span, 'the message element was not located');
+      span.style.display = 'none';
+      assert(locate.duplicateCodeError(scope) === DUPLICATE_TEXT,
+        'a hidden message must still be found, this is the lesson that cost a live run');
+      return 'presence is the signal, not visibility';
+    });
+
+    check('step 3: matching folds case and accents, and covers Spanish', function () {
+      var scope = mount('add');
+      var label = D.control('input[name="code"]', scope).closest('label');
+      var extra = document.createElement('span');
+      label.appendChild(extra);
+
+      extra.textContent = 'Este código ya está en uso por otro producto o versión';
+      assert(locate.duplicateCodeError(scope) === extra.textContent,
+        'the Spanish wording was not matched');
+
+      extra.textContent = 'El precio no es válido';
+      assert(locate.duplicateCodeError(scope) === '',
+        'an unrelated complaint must not be read as a duplicate');
+      return 'Spanish matched, an unrelated message rejected';
+    });
+
+    check('step 3: the caption and the typed value are never mistaken for a message', function () {
+      var scope = mount('duplicate-product-err');
+      var text = locate.duplicateCodeError(scope);
+      assert(text.indexOf('Code') !== 0, 'the label caption leaked in: ' + text);
+      assert(text.indexOf('EV-NEU-INT-NIN-PRE-01') === -1, 'the field value leaked in: ' + text);
+      return 'only the message itself';
+    });
+
+    check('step 3: a caption before the control is ignored', function () {
+      // The Add Image label on this very form puts a span before its input, so
+      // anything before the control has to be treated as decoration.
+      var scope = mount('add');
+      var label = document.createElement('label');
+      label.innerHTML = '<span>Add Image</span><span><input name="code" value="x"></span>';
+      scope.appendChild(label);
+      var planted = label.querySelector('input[name="code"]');
+      assert(D.messagesFor(planted).length === 0,
+        'a span before the control must not be read as a complaint');
+      return 'ordering rule holds';
+    });
+
+    check('step 3: the old error collector would have missed this entirely', function () {
+      var scope = mount('duplicate-product-err');
+      var oldWay = D.all('[role="alert"], [class*="error" i], [class*="invalid" i]', scope);
+      assert(oldWay.length === 0, 'the old query found ' + oldWay.length + ' nodes');
+      var input = D.control('input[name="code"]', scope);
+      assert(D.messagesFor(input)[0] === DUPLICATE_TEXT, 'the new reader should find it');
+      return 'why a dedicated locator was needed';
+    });
+
     /* ------------------------------------------------------ step 6 link form */
 
     check('step 6: the collapsed link form has no requirement checkboxes yet', function () {

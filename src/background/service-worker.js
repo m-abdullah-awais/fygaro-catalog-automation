@@ -260,6 +260,7 @@ handlers[S.MSG.LOAD_CATALOG] = function (msg, bucket) {
       // failed up front rather than breaking the run halfway through.
       status: r.link ? S.ROW.SKIPPED : (r.blocked ? S.ROW.FAILED : S.ROW.PENDING),
       error: r.link ? '' : (r.blocked ? r.blockedReason || 'This row cannot be processed.' : ''),
+      reason: r.link ? S.SKIP.HAD_LINK : '',
       productUuid: '',
       finishedAt: null
     };
@@ -365,6 +366,22 @@ handlers[S.MSG.RETRY] = function (msg, bucket) {
 
 /* Skipping restarts the row cycle from the dashboard so the next row begins
  * from a known page rather than wherever the failure left the browser. */
+/**
+ * Finishes the current row and puts the browser back on the dashboard, which is
+ * where the next row's first step belongs.
+ *
+ * Used both by a user skip and by a row that turned out to exist in Fygaro
+ * already, so either way the run carries on from a known page rather than from
+ * wherever the previous row happened to stop.
+ */
+function completeRowAndRestart(bucket, status) {
+  return completeRow(bucket, status, null).then(function () {
+    if (bucket.run.status === S.STATUS.DONE) return null;
+    bucket.run.status = S.STATUS.RUNNING;
+    return navigate(bucket.run, S.APP_URL);
+  });
+}
+
 handlers[S.MSG.SKIP_ROW] = function (msg, bucket) {
   var row = currentRow(bucket);
   if (row) {
@@ -372,11 +389,7 @@ handlers[S.MSG.SKIP_ROW] = function (msg, bucket) {
     log(bucket, 'warn', 'Row ' + row.sheetRow + ' (' + row.code + ') skipped by the user.');
     bucket.logDirty = true;
   }
-  return completeRow(bucket, S.ROW.FAILED, null).then(function () {
-    if (bucket.run.status === S.STATUS.DONE) return null;
-    bucket.run.status = S.STATUS.RUNNING;
-    return navigate(bucket.run, S.APP_URL);
-  }).then(function () {
+  return completeRowAndRestart(bucket, S.ROW.FAILED).then(function () {
     return { ok: true };
   });
 };
@@ -504,10 +517,30 @@ handlers[S.MSG.STEP_DONE] = function (msg, bucket, sender) {
     run.finishedAt = Date.now();
     log(bucket, 'success',
       'Dry run complete. The product form is filled for row ' + row.sheetRow +
-      ' and was not saved. Check the values on screen, then turn Dry run off.');
+      ' and was not saved. Check the values on screen, then turn Dry run off.' +
+      (msg.duplicate ? ' Note: Fygaro already reports that this code is taken (' +
+        U.truncate(msg.duplicate, 100) + '), so a real run would skip this row.' : ''));
     bucket.logDirty = true;
     notify('Dry run complete', 'The form is filled and was not saved. Check it, then turn Dry run off.');
     return Promise.resolve({ ok: true });
+  }
+
+  /*
+   * Fygaro refuses a Code that is already taken and stays on the form, so
+   * nothing was created and there is nothing to retry. The row is recorded as
+   * already existing and the run moves straight on to the next one, rather than
+   * spending two full step timeouts and then stopping for a human.
+   */
+  if (msg.step === S.STEP.FILL_PRODUCT && msg.duplicate) {
+    row.reason = S.SKIP.EXISTS;
+    row.error = 'Ya existe en Fygaro. Nothing was created and no link was captured.';
+    bucket.rowsDirty = true;
+    log(bucket, 'warn', 'Row ' + row.sheetRow + ' (' + row.code + ') skipped, it already exists in ' +
+      'Fygaro: ' + U.truncate(msg.duplicate, 120));
+    bucket.logDirty = true;
+    return completeRowAndRestart(bucket, S.ROW.SKIPPED).then(function () {
+      return { ok: true };
+    });
   }
 
   if (msg.step === S.STEP.CAPTURE_LINK) {

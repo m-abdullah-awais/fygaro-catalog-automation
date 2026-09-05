@@ -218,6 +218,45 @@
   };
 
   /**
+   * Validation text that a control's own label renders after it.
+   *
+   * Fygaro gives that message a content hashed class with no "error" or
+   * "invalid" in it, puts no role="alert" and no aria-invalid anywhere on the
+   * page, and leaves the input natively valid, so every query in D.collectErrors
+   * below finds nothing at all. The message is located by association instead:
+   * an element child of the label wrapping the control, positioned after the
+   * child that contains the control.
+   *
+   * The ordering rule is what keeps this honest. Decorative captions such as the
+   * "Add Image" span sit before their control, complaints sit after it.
+   *
+   * Presence is the signal, not visibility. Demanding visibility is what once
+   * made a locator pass against the snapshots and find nothing on the live site.
+   *
+   * @param {Element} control
+   * @returns {string[]} messages in document order
+   */
+  D.messagesFor = function (control) {
+    if (!control || !control.closest) return [];
+    var label = control.closest('label');
+    if (!label) return [];
+
+    var kids = Array.prototype.slice.call(label.children);
+    var at = -1;
+    for (var i = 0; i < kids.length; i++) {
+      if (kids[i] === control || kids[i].contains(control)) { at = i; break; }
+    }
+    if (at === -1) return [];
+
+    var out = [];
+    for (var j = at + 1; j < kids.length; j++) {
+      var text = U.normText(U.textOf(kids[j]));
+      if (text && text.length < 240 && out.indexOf(text) === -1) out.push(text);
+    }
+    return out;
+  };
+
+  /**
    * Collects anything on the page that looks like a validation complaint, so a
    * rejected save reports why instead of just saying it did not navigate.
    */
@@ -234,6 +273,15 @@
         var msg = (el.name ? el.name + ': ' : '') + el.validationMessage;
         if (found.indexOf(msg) === -1) found.push(msg);
       }
+    });
+    // Fygaro's own field complaints match none of the queries above, so without
+    // this a rejected save reports "did not lead anywhere" and says nothing
+    // about the reason the page gave.
+    D.all('input, select, textarea').forEach(function (el) {
+      D.messagesFor(el).forEach(function (text) {
+        var line = (el.name ? el.name + ': ' : '') + text;
+        if (found.indexOf(line) === -1) found.push(line);
+      });
     });
     return found.slice(0, 4);
   };

@@ -30,6 +30,25 @@
 
   var LINK_PATTERN = /^https?:\/\/[^\s]*\/pb\/[0-9a-f-]{36}\/?$/i;
 
+  /*
+   * Wording Fygaro uses when a product Code is already taken, folded so case and
+   * accents do not matter.
+   *
+   * The English string is verbatim from the captured page. The Spanish ones are
+   * the likely translations and have NOT been seen live, so an unrecognised
+   * message deliberately falls through to the normal failure path with its exact
+   * text reported, rather than a row being skipped on a guess.
+   */
+  var DUPLICATE_CODE_TEXT = [
+    'already in use',
+    'already exists',
+    'ya esta en uso',
+    'ya se esta usando',
+    'ya existe',
+    'codigo duplicado',
+    'duplicate code'
+  ];
+
   /* --------------------------------------------------------------- locators */
 
   /** Visible anchors whose path matches, in document order. */
@@ -134,6 +153,40 @@
       D.control('button[type="submit"]', scope);
   };
 
+  /**
+   * The complaint Fygaro renders beside the Code field, or ''.
+   *
+   * No class name is used. The message span's class is content hashed and holds
+   * neither "error" nor "invalid", the page carries no role="alert" and no
+   * aria-invalid, and the input stays natively valid, so it is found by its
+   * position relative to the Code input instead.
+   *
+   * Every copy of the field is tried, because this form renders some of its
+   * controls twice, once per responsive layout.
+   */
+  locate.codeFieldMessage = function (scope) {
+    var inputs = D.all('input[name="code"]', scope);
+    for (var i = 0; i < inputs.length; i++) {
+      var messages = D.messagesFor(inputs[i]);
+      if (messages.length) return messages[0];
+    }
+    return '';
+  };
+
+  /**
+   * That complaint, but only when it says the code is already taken.
+   * @returns {string} the message, or '' when the code was not refused as a duplicate
+   */
+  locate.duplicateCodeError = function (scope) {
+    var text = locate.codeFieldMessage(scope);
+    if (!text) return '';
+    var folded = U.foldText(text);
+    for (var i = 0; i < DUPLICATE_CODE_TEXT.length; i++) {
+      if (folded.indexOf(DUPLICATE_CODE_TEXT[i]) !== -1) return text;
+    }
+    return '';
+  };
+
   locate.backHomeLink = function (scope) {
     return linksMatching(PATH.dashboard, scope)[0] || null;
   };
@@ -175,6 +228,33 @@
       var here = S.routeOf(location.pathname);
       return wanted.indexOf(here) !== -1 ? here : null;
     }, timeoutMs, 'the ' + wanted.join(' or ') + ' page');
+  }
+
+  /**
+   * Waits for a save to resolve one of the two ways it can: the app navigates,
+   * or the Code field complains that the code is already taken.
+   *
+   * One probe rather than two racing promises, because D.waitFor is already
+   * driven by a MutationObserver and so sees the message the moment React
+   * inserts it. A taken code therefore costs about a second instead of a full
+   * step timeout, then a retry, then another full step timeout, then a human.
+   *
+   * The route is checked first, so a save that really did navigate can never be
+   * misread as a rejection.
+   */
+  function waitForSaveOutcome(routes, timeoutMs, action) {
+    var wanted = [].concat(routes);
+    return D.waitFor(function () {
+      var here = S.routeOf(location.pathname);
+      if (wanted.indexOf(here) !== -1) return { landedRoute: here };
+      var duplicate = STEPS.locate.duplicateCodeError();
+      return duplicate ? { duplicate: duplicate } : null;
+    }, timeoutMs, 'the ' + wanted.join(' or ') + ' page').catch(function () {
+      var problems = D.collectErrors();
+      fail(problems.length
+        ? action + ' was rejected by the page: ' + problems.join(' | ')
+        : action + ' did not lead anywhere. The page stayed on ' + location.pathname + '.');
+    });
   }
 
   /**
@@ -279,18 +359,26 @@
         return pause(settings);
       })
       .then(function () {
-        // A dry run stops with the form filled, so nothing is ever created.
-        if (settings.dryRun) return { dryRun: true };
+        // A dry run stops with the form filled, so nothing is ever created. The
+        // Code is still inspected, because Fygaro may have checked it when the
+        // field lost focus, and knowing early is useful. It is only reported.
+        if (settings.dryRun) return { dryRun: true, duplicate: locate.duplicateCodeError() };
+
+        // Fygaro can refuse the Code before Save is ever pressed. Nothing has
+        // been created in that case, so the row is reported without saving.
+        var already = locate.duplicateCodeError();
+        if (already) return { duplicate: already };
 
         var save = locate.saveButton();
         if (!save) fail('The Save button was not found on the item form.');
 
         D.click(save);
-        return waitForRouteOrExplain(['productList', 'productDetail'], settings.stepTimeoutMs, 'Saving the item')
-          .then(function (landed) {
+        return waitForSaveOutcome(['productList', 'productDetail'], settings.stepTimeoutMs, 'Saving the item')
+          .then(function (outcome) {
+            if (outcome.duplicate) return { duplicate: outcome.duplicate };
             return {
-              landedRoute: landed,
-              productUuid: landed === 'productDetail' ? U.extractUuid(location.pathname) : ''
+              landedRoute: outcome.landedRoute,
+              productUuid: outcome.landedRoute === 'productDetail' ? U.extractUuid(location.pathname) : ''
             };
           });
       });

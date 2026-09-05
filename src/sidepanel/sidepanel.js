@@ -666,7 +666,12 @@
       var badge = document.createElement('span');
       badge.className = 'badge';
       var word = document.createElement('span');
-      word.textContent = BADGE[row.status] || row.status;
+      // A row Fygaro already had is worth telling apart from one the sheet had
+      // already linked. Both are skipped, but only one of them means the product
+      // exists in Fygaro without a link of ours.
+      word.textContent = (row.status === S.ROW.SKIPPED && row.reason === S.SKIP.EXISTS)
+        ? 'Exists'
+        : (BADGE[row.status] || row.status);
       badge.appendChild(word);
 
       if (row.link) {
