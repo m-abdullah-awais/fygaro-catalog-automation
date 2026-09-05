@@ -219,4 +219,45 @@
     }
     return '';
   };
+
+  /** 1 becomes "A", 8 becomes "H", 27 becomes "AA". The inverse of X.colIndex. */
+  X.colName = function (n) {
+    var out = '';
+    var left = Math.max(1, Math.floor(n));
+    while (left > 0) {
+      var rem = (left - 1) % 26;
+      out = String.fromCharCode(65 + rem) + out;
+      left = Math.floor((left - 1) / 26);
+    }
+    return out;
+  };
+
+  /**
+   * The first column past everything the sheet already uses.
+   *
+   * Both labelled headers and any value found below them are counted, so a
+   * proposed column can never land on data that simply has no header. This is
+   * how a link column is chosen for a sheet that has none: on the real catalog
+   * the last header is H ("Columna 1"), which carries 1030 anchored product
+   * images and must not be written into, so the answer is I.
+   *
+   * @param {{labels: Array<{col: string}>}} header
+   * @param {{rows: Array<{r: number, cells: object}>}} sheetData
+   * @param {number} [spare] how many further columns to leave free
+   * @returns {string} a column letter
+   */
+  X.nextFreeColumn = function (header, sheetData, spare) {
+    var last = 0;
+    function widen(col) {
+      var n = X.colIndex(col);
+      if (n > last) last = n;
+    }
+    ((header && header.labels) || []).forEach(function (l) { widen(l.col); });
+    ((sheetData && sheetData.rows) || []).forEach(function (row) {
+      Object.keys(row.cells).forEach(function (col) {
+        if (FYG.util.normText(row.cells[col])) widen(col);
+      });
+    });
+    return X.colName(last + 1 + (spare || 0));
+  };
 })(typeof globalThis !== 'undefined' ? globalThis : self);

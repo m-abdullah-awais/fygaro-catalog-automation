@@ -31,6 +31,14 @@
   /* Confirmation of the last successful save, shown in the Export card. */
   var lastSaveMessage = '';
 
+  /* Columns this sheet does not have and the export therefore has to create,
+   * along with the headers to write above them. Empty when the sheet already
+   * had a link column, which is the case on every run after the first. */
+  var proposed = { link: '', note: '' };
+
+  /* Where the reason goes for a row that finished without a link. */
+  var noteColumn = '';
+
   var view = { run: S.defaultRun(), rows: [], log: [] };
   var filter = 'all';
   var searchTerm = '';
@@ -198,6 +206,21 @@
     });
   }
 
+  /**
+   * Sets a select, adding the value as an option first when it is not already
+   * there. A column the sheet has no header for is not in the option list, and
+   * assigning a missing value silently snaps the select back to "Not used".
+   */
+  function setSelectValue(select, value, label) {
+    if (value && !Array.prototype.some.call(select.options, function (o) { return o.value === value; })) {
+      var option = document.createElement('option');
+      option.value = value;
+      option.textContent = label || value;
+      select.appendChild(option);
+    }
+    select.value = value || '';
+  }
+
   function pickSheet(wb) {
     var match = wb.findSheet('Logros');
     return match ? match.name : wb.sheets[0].name;
@@ -209,14 +232,20 @@
     }), chosen);
   }
 
-  function renderMappingChoices(header, chosen) {
+  function renderMappingChoices(header, chosen, newColumn) {
     var choices = [{ value: '', label: 'Not used' }].concat(header.labels.map(function (l) {
       return { value: l.col, label: l.col + '  ' + U.truncate(l.label, 26) };
     }));
     optionList($('mapName'), choices, chosen.name);
     optionList($('mapCode'), choices, chosen.code);
     optionList($('mapPrice'), choices, chosen.price);
-    optionList($('mapLink'), choices, chosen.link);
+
+    // A column that does not exist yet has no header to list, so it is offered
+    // explicitly and labelled as new. Every real header stays on offer too, so
+    // the choice can still be overridden.
+    optionList($('mapLink'), newColumn
+      ? choices.concat([{ value: newColumn, label: newColumn + '  (new column "' + S.LINK_HEADER + '")' }])
+      : choices, chosen.link);
   }
 
   function currentMapping() {
@@ -286,7 +315,7 @@
     if (file.sheetName) $('sheetSelect').value = file.sheetName;
     var mapping = file.mapping || {};
     [['mapName', 'name'], ['mapCode', 'code'], ['mapPrice', 'price'], ['mapLink', 'link']]
-      .forEach(function (pair) { $(pair[0]).value = mapping[pair[1]] || ''; });
+      .forEach(function (pair) { setSelectValue($(pair[0]), mapping[pair[1]] || ''); });
   }
 
   function applyMapping() {
@@ -301,10 +330,23 @@
       (built.rows.length - withLink - blocked) + ' to process, ' +
       withLink + ' already have a link';
     if (blocked) summary += ', ' + blocked + ' cannot be processed';
+    if (proposed.link) {
+      summary += '. Links will go into a new column ' + proposed.link;
+    }
     $('fileSummary').textContent = summary + '.';
 
     return send(S.MSG.LOAD_CATALOG, {
-      file: { name: fileName, sheetName: $('sheetSelect').value, mapping: mapping },
+      file: {
+        name: fileName,
+        sheetName: $('sheetSelect').value,
+        mapping: mapping,
+        headerRow: headerInfo.headerRow,
+        // Only set when the export has to write the header itself, which is
+        // exactly when the sheet did not already have that column.
+        linkHeader: mapping.link && mapping.link === proposed.link ? S.LINK_HEADER : '',
+        noteColumn: noteColumn,
+        noteHeader: proposed.note && proposed.note === noteColumn ? S.NOTE_HEADER : ''
+      },
       rows: built.rows
     }).then(refresh);
   }
@@ -320,7 +362,25 @@
       link: X.findColumn(headerInfo, S.HEADERS.link)
     };
 
-    renderMappingChoices(headerInfo, detected);
+    /*
+     * This catalog has no link column at all, and its last column holds the
+     * product images, so one is proposed just past everything the sheet uses.
+     * On the next run the header written by the export is found by findColumn
+     * above and nothing is proposed, which is what lets a restart skip the rows
+     * that are already done.
+     */
+    proposed = { link: '', note: '' };
+    if (!detected.link) {
+      detected.link = X.nextFreeColumn(headerInfo, sheetData);
+      proposed.link = detected.link;
+    }
+    noteColumn = X.findColumn(headerInfo, S.HEADERS.note);
+    if (!noteColumn) {
+      noteColumn = X.colName(X.colIndex(detected.link) + 1);
+      proposed.note = noteColumn;
+    }
+
+    renderMappingChoices(headerInfo, detected, proposed.link);
     setHidden($('fileEmpty'), true);
     setHidden($('fileLoaded'), false);
     setHidden($('btnChangeFile'), false);
@@ -767,9 +827,19 @@
   function exportXlsx() {
     if (!workbook) return;
     var file = view.run.file || {};
-    var column = (file.mapping && file.mapping.link) || 'H';
+    var column = file.mapping && file.mapping.link;
     var sheetName = file.sheetName || $('sheetSelect').value;
     var toOriginal = $('targetOriginal').checked && !!fileHandle;
+
+    /*
+     * No silent fallback to a literal column. The last column of this catalog
+     * holds the product images, so guessing would write links underneath them.
+     */
+    if (!column) {
+      window.alert('There is no column to write the links into.\n\n' +
+        'Choose one under Link in the catalog card.');
+      return;
+    }
 
     var updates = view.rows
       .filter(function (r) { return r.link; })
@@ -777,13 +847,28 @@
 
     if (!updates.length) return;
 
+    // A row that finished without a link says why, in the sheet rather than
+    // only in the panel, so the reason is still there tomorrow.
+    var notes = view.rows
+      .filter(function (r) { return !r.link && r.error; })
+      .map(function (r) { return { row: r.sheetRow, value: r.error }; });
+
+    var batches = [{ column: column, updates: updates }];
+    if (file.linkHeader) {
+      batches[0].updates = [{ row: file.headerRow || 1, value: file.linkHeader }].concat(updates);
+    }
+    if (file.noteColumn && notes.length) {
+      if (file.noteHeader) notes.unshift({ row: file.headerRow || 1, value: file.noteHeader });
+      batches.push({ column: file.noteColumn, updates: notes });
+    }
+
     if (toOriginal && !window.confirm('Write ' + updates.length + ' link' +
       (updates.length === 1 ? '' : 's') + ' into ' + fileName + '?\n\n' +
       'This replaces the file on your disk. Close it in Excel first. Everything else in the workbook is ' +
       'kept exactly as it is.')) return;
 
     $('btnExportXlsx').disabled = true;
-    X.writeColumn(workbook, sheetName, column, updates)
+    X.writeColumns(workbook, sheetName, batches)
       .then(function (blob) {
         if (toOriginal) return saveOverOriginal(blob, updates);
         download(blob, X.exportName(fileName || file.name));

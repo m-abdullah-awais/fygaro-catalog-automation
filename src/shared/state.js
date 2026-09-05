@@ -97,8 +97,28 @@
     code: ['Código', 'Codigo', 'Code'],
     name: ['Servicios', 'Servicio', 'Service', 'Services'],
     price: ['Precio Total', 'Precio', 'Price'],
-    link: ['Link', 'Enlace', 'URL']
+    link: ['Link', 'Enlace', 'URL'],
+    note: ['Nota', 'Note', 'Estado del enlace']
   };
+
+  /*
+   * Headers written above columns this extension has to create for itself,
+   * because the catalog arrived with nowhere to put a link.
+   *
+   * LINK_HEADER must stay one of S.HEADERS.link. That single fact is what makes
+   * a restart safe: the header written on the first run is found by findColumn
+   * on the second, so rows that already carry a link are skipped rather than
+   * created a second time.
+   */
+  S.LINK_HEADER = 'Link';
+
+  /*
+   * Why a row finished without a link, written beside it so the reason survives
+   * in the spreadsheet rather than only in the panel. It is deliberately NOT the
+   * link column: a note sitting there would read as a link on the next load and
+   * the row would be skipped for the wrong reason.
+   */
+  S.NOTE_HEADER = 'Nota';
 
   /*
    * Bumped when a stored settings value needs correcting rather than merely

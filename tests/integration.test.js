@@ -13,8 +13,10 @@
   var S = FYG.state;
   var X = FYG.xlsx;
 
-  var WORKBOOK_PATH = '../docs/Cat%C3%A1logo%20de%20Productos%20y%20Servicios%20Fygaro.xlsx';
-  var WORKBOOK_NAME = 'Catálogo de Productos y Servicios Fygaro.xlsx';
+  // The trimmed fixture, not the real 63.5 MB catalog: headless Chrome does not
+  // finish fetching a file that size before it dumps the page.
+  var WORKBOOK_PATH = 'fixtures/catalog-sample.xlsx';
+  var WORKBOOK_NAME = 'catalog-sample.xlsx';
   var SHEET = 'Logros ';
 
   var results = [];
@@ -276,23 +278,26 @@
     })
 
     .then(function () {
-      return check('choosing the catalog file loads all 699 rows', function () {
+      return check('choosing the catalog file loads every row and proposes a link column', function () {
         // Goes through the file picker, which is what hands over a handle the
         // extension can later write back to.
         $('dropzone').click();
 
-        return waitUntil(function () { return $('statTotal').textContent === '699'; }, 'the rows to load', 20000)
+        return waitUntil(function () { return $('statTotal').textContent === '30'; }, 'the rows to load', 20000)
           .then(function () {
             assert($('sheetSelect').value === SHEET, 'sheet is "' + $('sheetSelect').value + '"');
             assert($('mapName').value === 'D', 'Name mapped to ' + $('mapName').value);
             assert($('mapCode').value === 'C', 'Code mapped to ' + $('mapCode').value);
             assert($('mapPrice').value === 'E', 'Price mapped to ' + $('mapPrice').value);
-            assert($('mapLink').value === 'H', 'Link mapped to ' + $('mapLink').value);
-            assert($('statSkipped').textContent === '1', 'expected 1 pre-skipped row, saw ' + $('statSkipped').textContent);
+            // The sheet has no Link column, so one is proposed past the images.
+            assert($('mapLink').value === 'I', 'Link mapped to ' + $('mapLink').value);
+            var chosen = $('mapLink').selectedOptions[0];
+            assert(/new column/.test(chosen.textContent), 'the option should say it is new: ' + chosen.textContent);
+            assert($('statSkipped').textContent === '0', 'expected no pre-skipped rows, saw ' + $('statSkipped').textContent);
             assert(!$('btnStart').disabled, 'Start should now be enabled');
             assert(!$('targetOriginal').disabled,
               'picking the file should make updating the original possible');
-            return '699 rows, columns detected, and the original file is writable';
+            return '30 rows, a new column I proposed, and the original file is writable';
           });
       });
     })
@@ -325,13 +330,12 @@
     })
 
     .then(function () {
-      return check('the row that already had a link is skipped, not redone', function () {
+      return check('no row is pre skipped, because none carries a link yet', function () {
         return readState().then(function (data) {
-          var row18 = data.rows.filter(function (r) { return r.sheetRow === 18; })[0];
-          assert(row18, 'row 18 is missing');
-          assert(row18.status === S.ROW.SKIPPED, 'row 18 is "' + row18.status + '"');
+          var skipped = data.rows.filter(function (r) { return r.status === S.ROW.SKIPPED; });
+          assert(skipped.length === 0, skipped.length + ' rows were pre skipped, expected none');
           assert(data.rows[0].status === S.ROW.PENDING, 'row 2 should be pending');
-          return 'row 18 skipped because column H was already filled';
+          return 'every row is still to do';
         });
       });
     })
@@ -438,7 +442,7 @@
           .then(function () {
             assert(!$('btnExportCsv').disabled, 'CSV export should be enabled');
             assert($('statDone').textContent === '1', 'done stat is ' + $('statDone').textContent);
-            assert($('progressText').textContent.indexOf('of 699') !== -1,
+            assert($('progressText').textContent.indexOf('of 30') !== -1,
               'progress reads "' + $('progressText').textContent + '"');
             return $('progressText').textContent;
           });
@@ -446,16 +450,16 @@
     })
 
     .then(function () {
-      return check('a second row runs and the skipped row 18 is never offered', function () {
+      return check('a second row runs and the cursor moves on', function () {
         var link = 'https://www.fygaro.com/en/pb/aaaaaaaa-2222-2222-2222-222222222222/';
         return playRow('aaaaaaaa-0000-0000-0000-000000000002', link).then(function () {
           return readState();
         }).then(function (data) {
           assert(data.run.stats.done === 2, 'done count is ' + data.run.stats.done);
-          var row18 = data.rows.filter(function (r) { return r.sheetRow === 18; })[0];
-          assert(row18.status === S.ROW.SKIPPED, 'row 18 changed to ' + row18.status);
-          assert(data.rows[data.run.cursor].sheetRow !== 18, 'the cursor landed on the skipped row');
-          return 'two rows done, row 18 left alone';
+          assert(data.rows[0].status === S.ROW.DONE, 'row 2 should be done');
+          assert(data.rows[1].status === S.ROW.DONE, 'row 3 should be done');
+          assert(data.run.cursor === 2, 'the cursor is at ' + data.run.cursor + ', expected row 4');
+          return 'two rows done, cursor on the third';
         });
       });
     })
@@ -558,7 +562,7 @@
           return readState();
         }).then(function (after) {
           assert(after.run.file.mapping.code === 'C', 'the stored mapping changed to ' + after.run.file.mapping.code);
-          assert(after.rows.filter(function (r) { return r.link; }).length === 3,
+          assert(after.rows.filter(function (r) { return r.link; }).length === 2,
             'links were lost, ' + after.rows.filter(function (r) { return r.link; }).length + ' remain');
           assert($('mapCode').value === 'C', 'the dropdown still shows ' + $('mapCode').value);
           return 'nothing reloaded, dropdown reverted to C';
@@ -616,22 +620,32 @@
               sheet.rows.forEach(function (r) { byRow[r.r] = r.cells; });
 
               done.forEach(function (row) {
-                assert(byRow[row.sheetRow].H === row.link,
-                  'sheet row ' + row.sheetRow + ' has "' + byRow[row.sheetRow].H + '" instead of its link');
+                assert(byRow[row.sheetRow].I === row.link,
+                  'sheet row ' + row.sheetRow + ' has "' + byRow[row.sheetRow].I + '" instead of its link');
               });
+              // The new column needs its header, or the links below it mean
+              // nothing and a reload cannot find them again.
+              assert(byRow[1].I === 'Link', 'the Link header is "' + byRow[1].I + '"');
+              assert(byRow[1].H === 'Columna 1', 'the images header changed to "' + byRow[1].H + '"');
+
               // Everything else must be exactly as it was.
-              assert(byRow[18].H.indexOf('/es/pb/5c03f135') !== -1, 'the pre-existing link was disturbed');
               assert(byRow[2].D === 'Cita de Ingreso Presencial con Psicóloga Clínica del Equipo',
                 'row 2 name changed');
               assert(wb.sheets.length === 6, 'sheets were lost');
 
-              // Rows the run never reached must still be empty.
-              var touched = done.map(function (r) { return r.sheetRow; }).concat([18]);
-              var untouched = data.rows.filter(function (r) { return touched.indexOf(r.sheetRow) === -1; });
-              assert(untouched.length > 600, 'expected most rows to be untouched');
-              untouched.slice(0, 50).forEach(function (r) {
+              // Column H carries the product images and must never be written to.
+              data.rows.forEach(function (r) {
                 assert(!byRow[r.sheetRow].H,
-                  'sheet row ' + r.sheetRow + ' should be empty, saw "' + byRow[r.sheetRow].H + '"');
+                  'sheet row ' + r.sheetRow + ' column H was written into: "' + byRow[r.sheetRow].H + '"');
+              });
+
+              // Rows the run never reached must still have no link.
+              var touched = done.map(function (r) { return r.sheetRow; });
+              var untouched = data.rows.filter(function (r) { return touched.indexOf(r.sheetRow) === -1; });
+              assert(untouched.length > 20, 'expected most rows to be untouched');
+              untouched.forEach(function (r) {
+                assert(!byRow[r.sheetRow].I,
+                  'sheet row ' + r.sheetRow + ' should have no link, saw "' + byRow[r.sheetRow].I + '"');
               });
               return done.length + ' links written to sheet rows ' +
                 done.map(function (r) { return r.sheetRow; }).join(' and ');
@@ -687,9 +701,10 @@
               var byRow = {};
               wb.readSheet(SHEET).rows.forEach(function (r) { byRow[r.r] = r.cells; });
               done.forEach(function (row) {
-                assert(byRow[row.sheetRow].H === row.link,
-                  'sheet row ' + row.sheetRow + ' was written as "' + byRow[row.sheetRow].H + '"');
+                assert(byRow[row.sheetRow].I === row.link,
+                  'sheet row ' + row.sheetRow + ' was written as "' + byRow[row.sheetRow].I + '"');
               });
+              assert(byRow[1].I === 'Link', 'the in place save lost the Link header');
               assert(wb.sheets.length === 6, 'the other sheets were lost');
               assert(byRow[2].D === 'Cita de Ingreso Presencial con Psicóloga Clínica del Equipo',
                 'row 2 was damaged');

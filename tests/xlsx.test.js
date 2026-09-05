@@ -4,6 +4,12 @@
  *
  * These cover the DOMParser based reader and the row building that the side
  * panel does, which is the part node cannot exercise.
+ *
+ * They run against tests/fixtures/catalog-sample.xlsx rather than the real
+ * catalog, because headless Chrome does not finish fetching a 63.5 MB file
+ * before it dumps the page. The fixture is cut from the real one by
+ * tools/build-sample-workbook.py and keeps every structural feature that
+ * matters, so this is a trim rather than a mock.
  */
 (function () {
   'use strict';
@@ -12,7 +18,7 @@
   var S = FYG.state;
   var X = FYG.xlsx;
 
-  var WORKBOOK_PATH = '../docs/Cat%C3%A1logo%20de%20Productos%20y%20Servicios%20Fygaro.xlsx';
+  var WORKBOOK_PATH = 'fixtures/catalog-sample.xlsx';
   var SHEET = 'Logros ';
 
   var results = [];
@@ -83,7 +89,7 @@
         assert(labels.indexOf('C=Código') !== -1, 'Código not found: ' + labels);
         assert(labels.indexOf('D=Servicios') !== -1, 'Servicios not found: ' + labels);
         assert(labels.indexOf('E=Precio Total') !== -1, 'Precio Total not found: ' + labels);
-        assert(labels.indexOf('H=Link') !== -1, 'Link not found: ' + labels);
+        assert(labels.indexOf('H=Columna 1') !== -1, 'Columna 1 not found: ' + labels);
         return labels;
       });
     })
@@ -98,17 +104,17 @@
         assert(mapping.name === 'D', 'Servicios mapped to ' + mapping.name);
         assert(mapping.code === 'C', 'Código mapped to ' + mapping.code);
         assert(mapping.price === 'E', 'Precio Total mapped to ' + mapping.price);
-        assert(mapping.link === 'H', 'Link mapped to ' + mapping.link);
-        return 'Servicios=D Código=C Precio=E Link=H';
+        assert(mapping.link === '', 'this sheet has no Link column, but one mapped to ' + mapping.link);
+        return 'Servicios=D Código=C Precio=E, and no Link column';
       });
     })
     .then(function () {
-      return check('builds all 699 catalog rows', function () {
+      return check('builds every data row and no header row', function () {
         var rows = buildRows(sheetData, header, mapping);
-        assert(rows.length === 699, 'built ' + rows.length + ' rows, expected 699');
+        assert(rows.length === 30, 'built ' + rows.length + ' rows, expected 30');
         assert(rows[0].sheetRow === 2, 'first row is sheet row ' + rows[0].sheetRow);
-        assert(rows[rows.length - 1].sheetRow === 700, 'last row is sheet row ' + rows[rows.length - 1].sheetRow);
-        return rows.length + ' rows, sheet rows 2 to 700';
+        assert(rows[rows.length - 1].sheetRow === 31, 'last row is sheet row ' + rows[rows.length - 1].sheetRow);
+        return rows.length + ' rows, sheet rows 2 to 31';
       });
     })
     .then(function () {
@@ -133,13 +139,11 @@
       });
     })
     .then(function () {
-      return check('the one row that already has a link is detected', function () {
+      return check('no row carries a link yet, so nothing is pre skipped', function () {
         var rows = buildRows(sheetData, header, mapping);
         var withLink = rows.filter(function (r) { return r.link; });
-        assert(withLink.length === 1, withLink.length + ' rows carry a link, expected 1');
-        assert(withLink[0].sheetRow === 18, 'the link is on row ' + withLink[0].sheetRow);
-        assert(withLink[0].link.indexOf('https://www.fygaro.com/es/pb/') === 0, 'unexpected link value');
-        return 'row 18 will be skipped';
+        assert(withLink.length === 0, withLink.length + ' rows carry a link, expected none');
+        return 'every row is still to do';
       });
     })
     .then(function () {
@@ -147,7 +151,7 @@
         var rows = buildRows(sheetData, header, mapping);
         var byRaw = {};
         rows.forEach(function (r) { byRaw[r.priceRaw] = r.priceText; });
-        var expected = { 'B/.100.00': '100.00', 'B/.625,00': '625.00', 'B/.1.125,00': '1125.00' };
+        var expected = { 'B/.100.00': '100.00', 'B/.80.00': '80.00', 'B/.120.00': '120.00' };
         Object.keys(expected).forEach(function (raw) {
           assert(byRaw[raw] === expected[raw], raw + ' parsed to ' + byRaw[raw] + ', expected ' + expected[raw]);
         });
@@ -155,12 +159,12 @@
       });
     })
     .then(function () {
-      return check('patching column H survives a full write and re read', function () {
+      return check('writing a new column survives a full write and re read', function () {
         var updates = [
           { row: 2, value: 'https://www.fygaro.com/en/pb/11111111-1111-1111-1111-111111111111/' },
-          { row: 700, value: 'https://www.fygaro.com/en/pb/22222222-2222-2222-2222-222222222222/' }
+          { row: 31, value: 'https://www.fygaro.com/en/pb/22222222-2222-2222-2222-222222222222/' }
         ];
-        return X.writeColumn(wb, SHEET, 'H', updates)
+        return X.writeColumn(wb, SHEET, 'I', updates)
           .then(function (blob) { return blob.arrayBuffer(); })
           .then(function (buffer) { return X.load(new Uint8Array(buffer)); })
           .then(function (again) {
@@ -168,10 +172,10 @@
             var byRow = {};
             data.rows.forEach(function (r) { byRow[r.r] = r.cells; });
 
-            assert(byRow[2].H === updates[0].value, 'row 2 link is "' + byRow[2].H + '"');
-            assert(byRow[700].H === updates[1].value, 'row 700 link is "' + byRow[700].H + '"');
-            // The pre existing link and the neighbouring data must be untouched.
-            assert(byRow[18].H.indexOf('/es/pb/5c03f135') !== -1, 'row 18 was disturbed');
+            assert(byRow[2].I === updates[0].value, 'row 2 link is "' + byRow[2].I + '"');
+            assert(byRow[31].I === updates[1].value, 'row 31 link is "' + byRow[31].I + '"');
+            // Column H holds the product images, so it must come through empty.
+            assert(!byRow[2].H, 'row 2 column H was written into: "' + byRow[2].H + '"');
             assert(byRow[2].C === 'CT-ING-PRE-EQ-01', 'row 2 code changed');
             assert(byRow[2].D === 'Cita de Ingreso Presencial con Psicóloga Clínica del Equipo', 'row 2 name changed');
             assert(byRow[2].E === 'B/.100.00', 'row 2 price changed');
@@ -186,8 +190,56 @@
         var data = wb.readSheet(SHEET);
         var byRow = {};
         data.rows.forEach(function (r) { byRow[r.r] = r.cells; });
-        assert(!byRow[2].H, 'row 2 in the original should still be empty, saw "' + byRow[2].H + '"');
+        assert(!byRow[2].I, 'row 2 in the original should still have no link, saw "' + byRow[2].I + '"');
+        assert(!byRow[2].H, 'row 2 column H should still be empty, saw "' + byRow[2].H + '"');
         return 'exporting twice stays correct';
+      });
+    })
+    .then(function () {
+      return check('a sheet with no Link column gets one proposed past the images', function () {
+        assert(X.findColumn(header, S.HEADERS.link) === '', 'this sheet should have no Link column');
+        assert(header.byLabel[U.foldText('Columna 1')] === 'H', 'the images column should be H');
+        var next = X.nextFreeColumn(header, sheetData);
+        assert(next === 'I', 'proposed ' + next + ', expected I');
+        assert(next !== 'H', 'the images column must never be proposed');
+        return 'links would go into a new column I';
+      });
+    })
+    .then(function () {
+      return check('column letters round trip through colName and colIndex', function () {
+        ['A', 'H', 'I', 'Z', 'AA', 'AZ', 'BA', 'ZZ', 'AAA'].forEach(function (col) {
+          assert(X.colName(X.colIndex(col)) === col, col + ' round tripped to ' + X.colName(X.colIndex(col)));
+        });
+        return 'A, H, I, Z, AA, AZ, BA, ZZ and AAA all survive';
+      });
+    })
+    .then(function () {
+      return check('writing the header makes a restart skip the rows already done', function () {
+        // This is the resume guarantee. The header written on the first run has
+        // to be the one findColumn looks for on the second, or every finished
+        // row would be created a second time.
+        var link = 'https://www.fygaro.com/en/pb/33333333-3333-3333-3333-333333333333/';
+        return X.writeColumn(wb, SHEET, 'I', [
+          { row: 1, value: S.LINK_HEADER },
+          { row: 2, value: link }
+        ])
+          .then(function (blob) { return blob.arrayBuffer(); })
+          .then(function (buffer) { return X.load(new Uint8Array(buffer)); })
+          .then(function (again) {
+            var data = again.readSheet(SHEET);
+            var reread = X.readHeader(data);
+            var mapped = X.findColumn(reread, S.HEADERS.link);
+            assert(mapped === 'I', 'on reload the Link column resolved to "' + mapped + '"');
+
+            var rows = buildRows(data, reread, {
+              name: 'D', code: 'C', price: 'E', link: mapped
+            });
+            var withLink = rows.filter(function (r) { return r.link; });
+            assert(withLink.length === 1, withLink.length + ' rows carry a link, expected 1');
+            assert(withLink[0].sheetRow === 2, 'the link came back on row ' + withLink[0].sheetRow);
+            assert(rows.length === 30, 'the header row leaked into the data: ' + rows.length + ' rows');
+            return 'the Link header is found again and row 2 is skipped';
+          });
       });
     })
     .then(report);
