@@ -120,13 +120,20 @@ rows that are already done. Column H holds the photos and is never written to.
 **Photos.** Pictures anchored in column H are uploaded to the product's Gallery. A row without one is
 created normally.
 
-Fygaro refuses anything over 2.5 MB with *"Image size exceeds 2.5MB"*, counting a megabyte as 1,000,000
-bytes rather than 1,048,576. One picture in this catalog is 2,525,525 bytes, which is over that line and
-under the binary one, which is why it failed on its own while everything else went through. Pictures above
-2.25 MB are re-encoded once when the catalog loads, at full resolution wherever that is enough: the one
-that failed comes out at 208 KB. The other 32 are stored exactly as they are, and the log names any that
-were reduced. If Fygaro still refuses one, the run stops on that row rather than creating a product
-without its photo. Of the 2073 rows, 1030 carry a picture and 1043 do not, and although the whole pipeline
+Fygaro refuses a picture with *"Image size exceeds 2.5MB"*, and it refuses these photos when they are
+uploaded by hand too. It is not measuring the file: 23 of the 35 pictures are between 1.9 and 2.5 MB on
+disk and are still refused, which points at the encoded upload, since base64 inflates a file by about a
+third.
+
+So every picture is re-encoded once when the catalog loads, aiming at 1 MB, which clears the limit however
+it is actually counted. **Nothing loses resolution.** These are photographs stored as PNG, which is the
+wrong format for them, so simply re-encoding is enough: all 35 keep their exact pixel dimensions, the set
+goes from 64.9 MB to 9.0 MB, and the largest ends up at 373 KB. That also drops what a full run uploads
+from roughly 2 GB to under 300 MB. It takes about ten seconds, once, as the file loads.
+
+Quality is spent before pixels are, so a picture is only ever scaled down if re-encoding alone cannot get
+it under. The log names every picture that was changed. If Fygaro still refuses one, the run stops on that
+row rather than creating a product without its photo. Of the 2073 rows, 1030 carry a picture and 1043 do not, and although the whole pipeline
 handles several per row, no row in this catalog has more than one. Only 35 distinct images are shared
 across those 1030 rows, so each is held once rather than once per row.
 

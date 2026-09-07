@@ -2,14 +2,16 @@
  * Fygaro Catalog Automation
  * Brings an oversized product picture under Fygaro's upload limit.
  *
- * Fygaro refuses anything over 2.5 MB with "Image size exceeds 2.5MB", counting
- * a megabyte as 1,000,000 bytes rather than 1,048,576. One picture in this
- * catalog is 2,525,525 bytes, which is over that line and under the binary one,
- * which is exactly why it failed while everything else went through.
+ * Fygaro refuses a picture with "Image size exceeds 2.5MB", and it refuses these
+ * photos when they are uploaded by hand as well, so the limit is not something
+ * the automation can sidestep. It is also not being applied to the file: most of
+ * this catalog is well under 2.5 MB as bytes on disk and is still refused. See
+ * TARGET_BYTES below for what that implies and what we aim at instead.
  *
- * Only pictures above the target are touched. Re-encoding costs quality, the
- * originals were chosen deliberately, and 32 of the 35 in this catalog are
- * comfortably inside the limit, so they are stored byte for byte as they are.
+ * Quality is spent before pixels are. Every picture in this catalog comes out at
+ * its original dimensions, because these are photographs stored as PNG and
+ * simply re-encoding them is enough. Anything already under the target is
+ * stored byte for byte as it is.
  */
 (function (root) {
   'use strict';
@@ -21,11 +23,24 @@
   F.LIMIT_BYTES = 2500000;
 
   /*
-   * What we aim for. The margin matters because the server may be measuring the
-   * encoded upload rather than the file, and being told a picture is too large
-   * after a product has been created is far worse than a slightly smaller photo.
+   * What we aim for, and it is far below the number in Fygaro's message on
+   * purpose.
+   *
+   * Fygaro refuses these photos when uploaded by hand too, not only through the
+   * extension, and most of them are nowhere near 2.5 MB as files: 23 of the 35
+   * are between 1.9 and 2.5 MB. So the limit is not being applied to the file.
+   * The most likely explanation is that it measures the encoded upload, and
+   * base64 inflates a file by about a third, which puts a 1.9 MB photo over a
+   * 2.5 MB payload limit. Aiming at 1 MB clears that with room to spare however
+   * it is actually counted.
+   *
+   * It costs almost nothing here. These are photographs stored as PNG, which is
+   * the wrong format for them: re-encoding all 35 keeps every one at its full
+   * pixel dimensions, takes the whole set from 64.9 MB to 9.0 MB, and leaves the
+   * largest at 373 KB. It also cuts what the run uploads from roughly 2 GB to
+   * under 300 MB, which matters over a run measured in tens of hours.
    */
-  F.TARGET_BYTES = 2250000;
+  F.TARGET_BYTES = 1000000;
 
   /* Tried in order. Quality first, because scaling loses detail permanently. */
   var QUALITIES = [0.92, 0.85, 0.78, 0.7, 0.6];

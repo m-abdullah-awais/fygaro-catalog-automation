@@ -48,7 +48,7 @@
    * without this a catalog loaded before a rule changed would keep uploading
    * the pictures it stored under the old one for ever.
    */
-  var IMAGE_FIT_VERSION = 1;
+  var IMAGE_FIT_VERSION = 2;
 
   var view = { run: S.defaultRun(), rows: [], log: [] };
   var filter = 'all';
@@ -132,9 +132,9 @@
         return chain.then(function () {
           $('fileSummary').textContent = 'Preparing image ' + (at + 1) + ' of ' + images.length + '...';
 
-          // Sized here, once per picture, rather than once per row. Fygaro
-          // refuses anything over 2.5 MB, and the same photo is used by as many
-          // as 80 rows, so finding that out during the run would waste hours.
+          // Sized here, once per picture, rather than once per row. The same
+          // photo is used by as many as 80 rows, so discovering Fygaro's limit
+          // during a run measured in tens of hours would waste most of them.
           return FYG.imagefit.fit(img.bytes, img.type, img.name).then(function (fitted) {
             if (fitted.changed || fitted.note) {
               reduced.push({ name: img.name, from: fitted.from, to: fitted.to, note: fitted.note });
@@ -159,8 +159,8 @@
     }).then(function () {
       reduced.forEach(function (r) {
         note(r.note ? 'warn' : 'info', 'Picture ' + r.name + ' was ' + Math.round(r.from / 1000) +
-          ' KB, over the 2.5 MB Fygaro accepts, so it was reduced to ' + Math.round(r.to / 1000) +
-          ' KB. ' + r.note);
+          ' KB, larger than Fygaro accepts, so it was re-encoded to ' + Math.round(r.to / 1000) +
+          ' KB at its original size. ' + r.note);
       });
       return images.length;
     }).catch(function (err) {
