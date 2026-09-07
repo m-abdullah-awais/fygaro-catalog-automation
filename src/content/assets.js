@@ -55,7 +55,17 @@
         if (first.size && bytes.length !== first.size) {
           throw new Error('The picture arrived incomplete: ' + bytes.length + ' of ' + first.size + ' bytes.');
         }
-        return new File([bytes], first.name, { type: first.type });
+
+        /*
+         * A last check before it reaches the form. The panel sizes pictures when
+         * the catalog is loaded, but a catalog stored by an older build holds
+         * whatever was written then, and Fygaro refusing the upload halfway
+         * through a run measured in hours is an expensive way to find out.
+         * Almost always this does nothing, because the bytes are already small.
+         */
+        return FYG.imagefit.fit(bytes, first.type, first.name).then(function (fitted) {
+          return new File([fitted.bytes], fitted.name, { type: fitted.type });
+        });
       });
     });
   }

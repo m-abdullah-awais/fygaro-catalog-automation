@@ -42,6 +42,14 @@
   /* Row to picture map for the loaded sheet, from FYG.xlsx.readImages. */
   var imageIndex = null;
 
+  /*
+   * Bumped whenever the rules for sizing a picture change. Pictures are stored
+   * once when the catalog is picked and then reused for every later run, so
+   * without this a catalog loaded before a rule changed would keep uploading
+   * the pictures it stored under the old one for ever.
+   */
+  var IMAGE_FIT_VERSION = 1;
+
   var view = { run: S.defaultRun(), rows: [], log: [] };
   var filter = 'all';
   var searchTerm = '';
@@ -141,6 +149,14 @@
         });
       }, Promise.resolve());
     }).then(function () {
+      return FYG.idb.run('workbook', 'readwrite', function (store) {
+        return store.put({
+          version: IMAGE_FIT_VERSION,
+          target: FYG.imagefit.TARGET_BYTES,
+          count: images.length
+        }, 'imagesMeta');
+      });
+    }).then(function () {
       reduced.forEach(function (r) {
         note(r.note ? 'warn' : 'info', 'Picture ' + r.name + ' was ' + Math.round(r.from / 1000) +
           ' KB, over the 2.5 MB Fygaro accepts, so it was reduced to ' + Math.round(r.to / 1000) +
@@ -236,6 +252,29 @@
    * none". A drawing this reader cannot follow must not stop the catalog from
    * loading, because the products still matter more than their photos.
    */
+  /**
+   * Re-prepares the stored pictures when they were written under older rules.
+   *
+   * A catalog is picked once and then reused for run after run, so a picture
+   * stored before the size limit was understood would otherwise keep being
+   * uploaded, and keep being refused, indefinitely.
+   */
+  function ensureImagesFitted(sheetName) {
+    return FYG.idb.run('workbook', 'readonly', function (store) {
+      return store.get('imagesMeta');
+    }).then(function (meta) {
+      if (meta && meta.version === IMAGE_FIT_VERSION && meta.target === FYG.imagefit.TARGET_BYTES) {
+        return 0;
+      }
+      var found = readImagesSafely(sheetName);
+      if (!found.images.size) return 0;
+      note('info', 'Re-checking the ' + found.images.size + ' product pictures against the size ' +
+        'Fygaro accepts, because they were prepared before that limit was known.');
+      imageIndex = found;
+      return storeImages(found);
+    }).catch(function () { return 0; });
+  }
+
   function readImagesSafely(name) {
     try {
       return X.readImages(workbook, name);
@@ -1259,6 +1298,7 @@
           setHidden($('fileLoaded'), false);
           setHidden($('btnChangeFile'), false);
           $('fileSummary').textContent = 'Loaded from ' + fileName + '.';
+          return ensureImagesFitted(file.sheetName).then(function () { return wb; });
         }
         return wb;
       });

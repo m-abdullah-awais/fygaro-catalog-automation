@@ -40,6 +40,30 @@
     if (!condition) throw new Error(message);
   }
 
+  /**
+   * A PNG of random pixels, which barely compresses, so a modest canvas gives a
+   * genuinely large file to test the size limit against.
+   */
+  function makeNoisyPng(side) {
+    var canvas = document.createElement('canvas');
+    canvas.width = side;
+    canvas.height = side;
+    var ctx = canvas.getContext('2d');
+    var picture = ctx.createImageData(side, side);
+    for (var i = 0; i < picture.data.length; i += 4) {
+      picture.data[i] = Math.random() * 256;
+      picture.data[i + 1] = Math.random() * 256;
+      picture.data[i + 2] = Math.random() * 256;
+      picture.data[i + 3] = 255;
+    }
+    ctx.putImageData(picture, 0, 0);
+    return new Promise(function (resolve) {
+      canvas.toBlob(function (blob) {
+        blob.arrayBuffer().then(function (buffer) { resolve(new Uint8Array(buffer)); });
+      }, 'image/png');
+    });
+  }
+
   function check(name, fn) {
     // A check that never settles used to stall the whole page, which reported
     // nothing at all and said nothing about which one was stuck. It fails now.
@@ -558,6 +582,44 @@
               });
             });
           });
+      });
+    })
+
+    .then(function () {
+      return check('a picture stored oversized is shrunk before it reaches the form', function () {
+        /*
+         * A catalog loaded by an older build holds whatever was written then, so
+         * the page checks again rather than trusting what it is handed. Fygaro
+         * refusing an upload part way through a run of this length is a very
+         * expensive way to discover the limit.
+         */
+        var id = 'xl/media/oversized.png';
+        var realTarget = FYG.imagefit.TARGET_BYTES;
+
+        return makeNoisyPng(200).then(function (big) {
+          return FYG.idb.run('images', 'readwrite', function (store) {
+            return store.put({
+              id: id, name: 'oversized.png', type: 'image/png', size: big.length,
+              blob: new Blob([big], { type: 'image/png' })
+            }, id);
+          }).then(function () {
+            // Stand in for the 2.5 MB limit at a size the fixture can reach.
+            FYG.imagefit.TARGET_BYTES = Math.floor(big.length / 3);
+            FYG.assets.clear();
+            return FYG.assets.fetchImage(id);
+          }).then(function (file) {
+            FYG.imagefit.TARGET_BYTES = realTarget;
+            assert(file.size <= Math.floor(big.length / 3),
+              'the form was handed ' + file.size + ' bytes, over the limit');
+            assert(file.size < big.length, 'it was not actually shrunk');
+            assert(file.type === 'image/jpeg', 'it should arrive as JPEG, saw ' + file.type);
+            assert(file.name === 'oversized.jpg', 'the name should follow, saw ' + file.name);
+            return big.length + ' bytes stored, ' + file.size + ' bytes handed over';
+          }).catch(function (err) {
+            FYG.imagefit.TARGET_BYTES = realTarget;
+            throw err;
+          });
+        });
       });
     })
 

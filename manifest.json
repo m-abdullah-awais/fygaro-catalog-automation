@@ -44,6 +44,7 @@
         "src/shared/util.js",
         "src/shared/price.js",
         "src/shared/state.js",
+        "src/shared/image-fit.js",
         "src/content/assets.js",
         "src/content/dom.js",
         "src/content/steps.js",

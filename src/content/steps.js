@@ -418,11 +418,12 @@
         // Fygaro judges a picture only once it has been handed over, so this is
         // the first moment it can say no. Saving anyway would create the product
         // without its photo and report success.
+        var sized = file.name + ' (' + Math.round(file.size / 1000) + ' KB)';
         var refused = locate.galleryMessage();
         if (refused) {
-          fail('Fygaro refused the picture ' + file.name + ' for row ' + row.sheetRow + ': ' + refused);
+          fail('Fygaro refused ' + sized + ' for row ' + row.sheetRow + ': ' + refused);
         }
-        return file.name;
+        return sized;
       });
     });
   }
