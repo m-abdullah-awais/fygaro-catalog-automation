@@ -318,6 +318,38 @@
   }
 
   /**
+   * Waits for a locator to find its target.
+   *
+   * Fygaro renders a page after its URL has already changed, so arriving on a
+   * route says nothing about the controls being on screen yet. Looking exactly
+   * once, the instant a step begins, is how a Create button that was about to
+   * exist got reported as missing.
+   */
+  function waitForTarget(find, timeoutMs, label, missing) {
+    return D.waitFor(find, timeoutMs, label).catch(function () { fail(missing); });
+  }
+
+  /**
+   * Waits for a control, pauses the way a person would, then looks it up a
+   * second time and clicks that.
+   *
+   * The second lookup is the whole point. The pause is over a second, which is
+   * ample time for React to re-render and replace the node, and clicking the
+   * element it replaced does nothing at all. That then surfaces much later as a
+   * navigation that never happened, nowhere near its actual cause.
+   */
+  function settleThenClick(find, settings, label, missing) {
+    return waitForTarget(find, settings.stepTimeoutMs, label, missing)
+      .then(function () { return pause(settings); })
+      .then(function () {
+        var target = find();
+        if (!target) fail(missing);
+        D.click(target);
+        return target;
+      });
+  }
+
+  /**
    * Waits for a save to resolve one of the two ways it can: the app navigates,
    * or the Code field complains that the code is already taken.
    *
@@ -470,22 +502,26 @@
 
   /** 1. On the dashboard, open Products from the sidebar. */
   STEPS[S.STEP.NAV_TO_PRODUCTS] = function (job) {
-    var link = locate.productsSidebarLink();
-    if (!link) fail('The Products link was not found in the sidebar.');
-
-    return pause(job.settings).then(function () {
-      D.click(link);
+    return settleThenClick(
+      function () { return locate.productsSidebarLink(); },
+      job.settings,
+      'the Products link in the sidebar',
+      'The Products link never appeared in the sidebar.'
+    ).then(function () {
       return waitForRouteOrExplain('productList', job.settings.stepTimeoutMs, 'Opening Products');
     }).then(function () { return {}; });
   };
 
   /** 2. On the products list, use the Create control in the top right. */
   STEPS[S.STEP.CLICK_CREATE] = function (job) {
-    var target = locate.createItemLink();
-    if (!target) fail('No Create control was found on the products page.');
-
-    return pause(job.settings).then(function () {
-      D.click(target);
+    // The products list is the page this matters most on. It is reached by a
+    // click in the sidebar, and its toolbar arrives a moment after the URL does.
+    return settleThenClick(
+      function () { return locate.createItemLink(); },
+      job.settings,
+      'the Create control on the products page',
+      'No Create control appeared on the products page.'
+    ).then(function () {
       return waitForRouteOrExplain('productAdd', job.settings.stepTimeoutMs, 'Opening the new item form');
     }).then(function () { return {}; });
   };
@@ -565,21 +601,18 @@
   STEPS[S.STEP.OPEN_PRODUCT] = function (job) {
     var row = job.row;
 
-    return D.waitFor(function () { return locate.productListItem(null, row.name, row.code); },
-      job.settings.stepTimeoutMs, 'the product "' + U.truncate(row.name, 60) + '" in the list')
-      .catch(function () {
-        fail('The product "' + U.truncate(row.name, 80) + '" (code ' + row.code +
-          ') did not appear in the products list, so it may not have saved.');
-      })
-      .then(function (anchor) {
-        var uuid = U.extractUuid(anchor.getAttribute('href'));
-        return pause(job.settings).then(function () {
-          D.click(anchor);
-          return waitForRouteOrExplain('productDetail', job.settings.stepTimeoutMs, 'Opening the product');
-        }).then(function () {
-          return { productUuid: uuid };
-        });
-      });
+    return settleThenClick(
+      function () { return locate.productListItem(null, row.name, row.code); },
+      job.settings,
+      'the product "' + U.truncate(row.name, 60) + '" in the list',
+      'The product "' + U.truncate(row.name, 80) + '" (code ' + row.code +
+        ') did not appear in the products list, so it may not have saved.'
+    ).then(function (anchor) {
+      // Read from the row actually clicked, not the one found before the pause.
+      var uuid = U.extractUuid(anchor.getAttribute('href'));
+      return waitForRouteOrExplain('productDetail', job.settings.stepTimeoutMs, 'Opening the product')
+        .then(function () { return { productUuid: uuid }; });
+    });
   };
 
   /** 5. Confirm the right product is open, then start its Fygaro Link. */
@@ -607,11 +640,12 @@
             '" but row ' + row.sheetRow + ' expects "' + row.code + '".');
         }
 
-        var target = locate.createLinkAction();
-        if (!target) fail('The "Create Fygaro Link for Product" button was not found.');
-
-        return pause(job.settings).then(function () {
-          D.click(target);
+        return settleThenClick(
+          function () { return locate.createLinkAction(); },
+          job.settings,
+          'the "Create Fygaro Link for Product" button',
+          'The "Create Fygaro Link for Product" button never appeared on the product page.'
+        ).then(function () {
           return waitForRouteOrExplain('linkAdd', job.settings.stepTimeoutMs, 'Starting the Fygaro Link');
         });
       })
@@ -703,10 +737,12 @@
         var copy = locate.copyLinkButton();
         if (copy) { try { D.click(copy); } catch (e) { /* purely cosmetic */ } }
 
-        return pause(settings).then(function () {
-          var home = locate.backHomeLink();
-          if (!home) fail('The "Back to Home" link was not found in the sidebar.');
-          D.click(home);
+        return settleThenClick(
+          function () { return locate.backHomeLink(); },
+          settings,
+          'the "Back to Home" link in the sidebar',
+          'The "Back to Home" link never appeared in the sidebar.'
+        ).then(function () {
           return waitForRouteOrExplain('dashboard', settings.stepTimeoutMs, 'Going back to the dashboard');
         }).then(function () {
           return { link: link };

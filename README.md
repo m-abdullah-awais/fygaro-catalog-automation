@@ -353,9 +353,9 @@ npm run lint       # syntax, house rules, and manifest references
 | `tests/price.test.mjs` | 9 | Every one of the 2073 real prices, cross checked against a separate reference implementation |
 | `tests/state.test.mjs` | 11 | Run state, routes, and that a run saved by an older version gains every setting added since |
 | `tests/xlsx.test.mjs` | 14 | ZIP round trips, style preservation, XML escaping, writing a column the sheet has no cells for, and that an unedited rewrite reproduces all 66 parts byte for byte |
-| `tests/selectors.test.html` | 54 | Every locator, run against the nine captured page snapshots, with Fygaro's checkbox and file field styling reproduced |
-| `tests/xlsx.test.html` | 23 | Workbook reading, sheet and column detection, the drawing that anchors the photos, patch and re read |
-| `tests/integration.test.html` | 32 | The real side panel driving the real worker through a full run |
+| `tests/selectors.test.html` | 61 | Every locator, run against the nine captured page snapshots, plus the steps waiting for controls that render late |
+| `tests/xlsx.test.html` | 26 | Workbook reading, sheet and column detection, the drawing that anchors the photos, patch and re read |
+| `tests/integration.test.html` | 33 | The real side panel driving the real worker through a full run |
 
 The integration suite is the interesting one. It stubs the Chrome APIs, loads the actual worker and the
 actual panel, then plays a run through: 699 rows loaded, all seven steps walked for several rows, a failure

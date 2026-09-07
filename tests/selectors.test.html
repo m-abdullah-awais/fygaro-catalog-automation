@@ -710,6 +710,137 @@
 
     stage.innerHTML = '';
 
+  /* ------------------------------------------- steps waiting for the page */
+
+  /*
+   * A click on a snapshot link would navigate this page away and end the run
+   * with no result at all, which is exactly what happened the first time these
+   * were written. Every link click inside the stage is neutralised here, and
+   * recorded so a test can assert the click really happened.
+   */
+  var stageClicks = [];
+
+  /**
+   * Puts a link on the stage and neutralises it.
+   *
+   * The listener goes on the element itself, not on the document. A step that
+   * clicks a node the page has already replaced is clicking a detached element,
+   * whose click never reaches a document listener but does still follow its
+   * href, which navigated this page away and ended the run with no result at
+   * all. That is precisely the bug these tests exist to catch, so it has to
+   * produce a failure rather than a silent stop.
+   */
+  function plant(id, href, text) {
+    var anchor = document.createElement('a');
+    anchor.id = id;
+    anchor.href = href;
+    anchor.textContent = text;
+    anchor.addEventListener('click', function (e) {
+      e.preventDefault();
+      stageClicks.push(anchor);
+    });
+    stage.appendChild(anchor);
+    return anchor;
+  }
+
+  /*
+   * Fygaro renders a page after its URL has already changed, so a step that
+   * looks for its control the instant it starts can miss one that is about to
+   * exist. These drive the real step functions against a stage that fills in
+   * late. Each step is expected to fail at the navigation, because no test page
+   * can match a Fygaro route; what is being asserted is what happened before
+   * that.
+   */
+  function checkLater(name, fn) {
+    return Promise.resolve().then(fn)
+      .then(function (detail) { results.push({ ok: true, name: name, detail: detail || '' }); })
+      .catch(function (err) {
+        results.push({ ok: false, name: name, detail: String(err && err.message ? err.message : err) });
+      });
+  }
+
+  var IMPATIENT = { minDelayMs: 0, maxDelayMs: 0, stepTimeoutMs: 900, maxAttempts: 1 };
+
+  function runStep(step, settings) {
+    return FYG.steps[step]({ settings: settings || IMPATIENT, row: {} })
+      .then(function () { return ''; }, function (err) { return err.message; });
+  }
+
+  Promise.resolve()
+    .then(function () {
+      return checkLater('step 2: waits for a Create control that renders late', function () {
+        stage.innerHTML = '';
+        stageClicks.length = 0;
+        setTimeout(function () { plant('lateCreate', '/en/app/products/add/', 'Create'); }, 250);
+
+        return runStep(S.STEP.CLICK_CREATE).then(function (message) {
+          assert(stageClicks.length === 1, 'the late Create control was clicked ' +
+            stageClicks.length + ' times');
+          assert(!/No Create control appeared/.test(message),
+            'it gave up before the control appeared: ' + message);
+          return 'waited 250ms for it, then clicked it';
+        });
+      });
+    })
+    .then(function () {
+      return checkLater('step 2: says so plainly when the Create control never comes', function () {
+        stage.innerHTML = '';
+        stageClicks.length = 0;
+        return runStep(S.STEP.CLICK_CREATE).then(function (message) {
+          assert(/No Create control appeared on the products page/.test(message),
+            'unhelpful message: ' + message);
+          assert(stageClicks.length === 0, 'it clicked something that was not there');
+          return message;
+        });
+      });
+    })
+    .then(function () {
+      return checkLater('step 1: waits for a sidebar that renders late', function () {
+        stage.innerHTML = '';
+        stageClicks.length = 0;
+        setTimeout(function () { plant('lateNav', '/en/app/products/', 'Products'); }, 250);
+
+        return runStep(S.STEP.NAV_TO_PRODUCTS).then(function (message) {
+          assert(stageClicks.length === 1, 'the late Products link was clicked ' +
+            stageClicks.length + ' times');
+          assert(!/never appeared in the sidebar/.test(message),
+            'it gave up before the link appeared: ' + message);
+          return 'waited 250ms for it, then clicked it';
+        });
+      });
+    })
+    .then(function () {
+      return checkLater('a control replaced while the step pauses is still the one clicked', function () {
+        /*
+         * The pause between finding a control and clicking it is over a second
+         * on real settings, ample time for React to swap the node. Clicking the
+         * element that was replaced does nothing at all, and surfaces much later
+         * as a navigation that never happened, nowhere near its cause.
+         */
+        stage.innerHTML = '';
+        stageClicks.length = 0;
+        var stale = plant('stale', '/en/app/products/add/', 'Create');
+
+        setTimeout(function () {
+          stage.innerHTML = '';
+          plant('fresh', '/en/app/products/add/', 'Create');
+        }, 120);
+
+        return runStep(S.STEP.CLICK_CREATE,
+          { minDelayMs: 300, maxDelayMs: 300, stepTimeoutMs: 900, maxAttempts: 1 })
+          .then(function () {
+            assert(stageClicks.length === 1, 'clicked ' + stageClicks.length + ' controls');
+            assert(stageClicks[0].id === 'fresh',
+              'it clicked "' + stageClicks[0].id + '", the node that had already been replaced');
+            assert(stageClicks[0] !== stale, 'it clicked the detached node');
+            return 'clicked the live control, not the one it first found';
+          });
+      });
+    })
+    .then(function () { stage.innerHTML = ''; })
+    .then(report);
+
+  function report() {
     var failed = results.filter(function (r) { return !r.ok; });
     var summary = document.getElementById('summary');
     summary.className = failed.length ? 'fail' : 'pass';
@@ -750,7 +881,8 @@
       li.appendChild(detail);
       list.appendChild(li);
     });
-  })();
+  }
+})();
   </script>
 </body>
 </html>
