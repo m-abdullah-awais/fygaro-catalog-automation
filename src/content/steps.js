@@ -34,6 +34,23 @@
   var GALLERY_LEGENDS = ['gallery', 'galeria', 'imagenes', 'images', 'fotos'];
 
   /*
+   * Wording Fygaro uses when it refuses a picture. The size complaint is
+   * verbatim from the live site, which counts 2.5 MB as 2,500,000 bytes: one
+   * catalog image at 2,525,525 bytes was refused while everything else went
+   * through. The rest are the neighbouring cases in both languages.
+   */
+  var GALLERY_REFUSAL_TEXT = [
+    'exceeds',
+    'too large',
+    'excede',
+    'demasiado grande',
+    'not supported',
+    'no soportado',
+    'invalid image',
+    'imagen no valida'
+  ];
+
+  /*
    * Wording Fygaro uses when a product Code is already taken, folded so case and
    * accents do not matter.
    *
@@ -183,6 +200,44 @@
     if (inGallery) return inGallery;
 
     return inputs.filter(function (el) { return el.name === 'files'; })[0] || inputs[0];
+  };
+
+  /**
+   * A complaint shown inside the picture gallery, or ''.
+   *
+   * The gallery only ever says two quiet things of its own, naming the panel and
+   * inviting a file, so anything matching a refusal is a real one. Fygaro
+   * rejects a picture after it has been chosen rather than before, which is why
+   * this has to be read after attaching rather than guessed at from the size.
+   */
+  locate.galleryMessage = function (scope) {
+    var input = locate.galleryInput(scope);
+    var box = input && input.closest ? input.closest('fieldset') : null;
+    if (!box) return '';
+
+    function refuses(value) {
+      var folded = U.foldText(value);
+      for (var i = 0; i < GALLERY_REFUSAL_TEXT.length; i++) {
+        if (folded.indexOf(GALLERY_REFUSAL_TEXT[i]) !== -1) return true;
+      }
+      return false;
+    }
+
+    if (!refuses(U.textOf(box))) return '';
+
+    /*
+     * Report the element that actually carries the complaint, not the panel it
+     * sits in. Text is read per element rather than split out of the whole
+     * panel, because the gallery's own labels run together without punctuation
+     * and there is nothing reliable to split on.
+     */
+    var best = '';
+    Array.prototype.forEach.call(box.querySelectorAll('*'), function (el) {
+      var own = U.normText(U.textOf(el));
+      if (!own || !refuses(own)) return;
+      if (!best || own.length < best.length) best = own;
+    });
+    return best || U.normText(U.textOf(box));
   };
 
   /**
@@ -359,7 +414,16 @@
         fail('Attaching the picture cleared the Name field, so the item would have saved wrong.');
       }
 
-      return waitForGalleryReady(input, settings).then(function () { return file.name; });
+      return waitForGalleryReady(input, settings).then(function () {
+        // Fygaro judges a picture only once it has been handed over, so this is
+        // the first moment it can say no. Saving anyway would create the product
+        // without its photo and report success.
+        var refused = locate.galleryMessage();
+        if (refused) {
+          fail('Fygaro refused the picture ' + file.name + ' for row ' + row.sheetRow + ': ' + refused);
+        }
+        return file.name;
+      });
     });
   }
 

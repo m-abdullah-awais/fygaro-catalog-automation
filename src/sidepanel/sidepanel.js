@@ -117,19 +117,35 @@
     found.images.forEach(function (img) { images.push(img); });
     if (!images.length) return Promise.resolve(0);
 
+    var reduced = [];
+
     return FYG.idb.clearStore('images').then(function () {
       return images.reduce(function (chain, img, at) {
         return chain.then(function () {
-          $('fileSummary').textContent = 'Storing image ' + (at + 1) + ' of ' + images.length + '...';
-          return FYG.idb.run('images', 'readwrite', function (store) {
-            return store.put({
-              id: img.id, name: img.name, type: img.type, size: img.size,
-              blob: new Blob([img.bytes], { type: img.type })
-            }, img.id);
+          $('fileSummary').textContent = 'Preparing image ' + (at + 1) + ' of ' + images.length + '...';
+
+          // Sized here, once per picture, rather than once per row. Fygaro
+          // refuses anything over 2.5 MB, and the same photo is used by as many
+          // as 80 rows, so finding that out during the run would waste hours.
+          return FYG.imagefit.fit(img.bytes, img.type, img.name).then(function (fitted) {
+            if (fitted.changed || fitted.note) {
+              reduced.push({ name: img.name, from: fitted.from, to: fitted.to, note: fitted.note });
+            }
+            return FYG.idb.run('images', 'readwrite', function (store) {
+              return store.put({
+                id: img.id, name: fitted.name, type: fitted.type, size: fitted.bytes.length,
+                blob: new Blob([fitted.bytes], { type: fitted.type })
+              }, img.id);
+            });
           });
         });
       }, Promise.resolve());
     }).then(function () {
+      reduced.forEach(function (r) {
+        note(r.note ? 'warn' : 'info', 'Picture ' + r.name + ' was ' + Math.round(r.from / 1000) +
+          ' KB, over the 2.5 MB Fygaro accepts, so it was reduced to ' + Math.round(r.to / 1000) +
+          ' KB. ' + r.note);
+      });
       return images.length;
     }).catch(function (err) {
       note('warn', 'The product images could not be stored: ' + err.message +

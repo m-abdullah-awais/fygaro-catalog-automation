@@ -36,6 +36,30 @@
       });
   }
 
+  /**
+   * Builds a PNG of random pixels, which barely compresses, so a modest canvas
+   * yields a genuinely large file to test the size fitter against.
+   */
+  function makeNoisyPng(side) {
+    var canvas = document.createElement('canvas');
+    canvas.width = side;
+    canvas.height = side;
+    var ctx = canvas.getContext('2d');
+    var picture = ctx.createImageData(side, side);
+    for (var i = 0; i < picture.data.length; i += 4) {
+      picture.data[i] = Math.random() * 256;
+      picture.data[i + 1] = Math.random() * 256;
+      picture.data[i + 2] = Math.random() * 256;
+      picture.data[i + 3] = 255;
+    }
+    ctx.putImageData(picture, 0, 0);
+    return new Promise(function (resolve) {
+      canvas.toBlob(function (blob) {
+        blob.arrayBuffer().then(function (buffer) { resolve(new Uint8Array(buffer)); });
+      }, 'image/png');
+    });
+  }
+
   /** Mirrors the row building in src/sidepanel/sidepanel.js. */
   function buildRows(sheetData, header, mapping) {
     var rows = [];
@@ -289,6 +313,64 @@
         assert(X.relsPathFor('xl/worksheets/sheet1.xml') === 'xl/worksheets/_rels/sheet1.xml.rels',
           'rels path failed');
         return 'relative, absolute and bare targets all resolve';
+      });
+    })
+    .then(function () {
+      return check('a picture within the limit is stored byte for byte', function () {
+        var found = X.readImages(wb, SHEET);
+        var img = found.images.get(found.byRow.get(2)[0]);
+        return FYG.imagefit.fit(img.bytes, img.type, img.name).then(function (fitted) {
+          assert(fitted.changed === false, 'a small picture should not be re-encoded');
+          assert(fitted.bytes === img.bytes, 'the original bytes should be handed straight back');
+          assert(fitted.name === img.name, 'the name changed to ' + fitted.name);
+          return 'left alone at ' + img.bytes.length + ' bytes';
+        });
+      });
+    })
+    .then(function () {
+      return check('a picture over the limit is brought under it', function () {
+        // Fygaro refuses anything over 2.5 MB, counting a megabyte as 1,000,000
+        // bytes. Rather than build a 2.5 MB fixture, the target is lowered so
+        // the same code path runs against a picture that really is too big.
+        var realTarget = FYG.imagefit.TARGET_BYTES;
+        return makeNoisyPng(220).then(function (big) {
+          FYG.imagefit.TARGET_BYTES = Math.floor(big.length / 3);
+          return FYG.imagefit.fit(big, 'image/png', 'huge.png')
+            .then(function (fitted) {
+              FYG.imagefit.TARGET_BYTES = realTarget;
+              assert(fitted.changed === true, 'an oversized picture should be re-encoded');
+              assert(fitted.bytes.length <= Math.floor(big.length / 3),
+                'still ' + fitted.bytes.length + ' bytes, over the target');
+              assert(fitted.bytes.length < big.length, 'it did not actually get smaller');
+              assert(fitted.type === 'image/jpeg', 'it should come out as JPEG, saw ' + fitted.type);
+              assert(fitted.name === 'huge.jpg', 'the name should follow the format, saw ' + fitted.name);
+              assert(fitted.bytes[0] === 0xFF && fitted.bytes[1] === 0xD8, 'the bytes are not a JPEG');
+              return big.length + ' bytes down to ' + fitted.bytes.length;
+            })
+            .catch(function (err) {
+              FYG.imagefit.TARGET_BYTES = realTarget;
+              throw err;
+            });
+        });
+      });
+    })
+    .then(function () {
+      return check('a picture that cannot be decoded is left alone rather than lost', function () {
+        var notAnImage = new Uint8Array(64);
+        var realTarget = FYG.imagefit.TARGET_BYTES;
+        FYG.imagefit.TARGET_BYTES = 8;
+        return FYG.imagefit.fit(notAnImage, 'image/png', 'broken.png')
+          .then(function (fitted) {
+            FYG.imagefit.TARGET_BYTES = realTarget;
+            assert(fitted.changed === false, 'nothing should have been re-encoded');
+            assert(fitted.bytes === notAnImage, 'the original bytes should survive');
+            assert(fitted.note, 'it should say why it was left alone');
+            return fitted.note;
+          })
+          .catch(function (err) {
+            FYG.imagefit.TARGET_BYTES = realTarget;
+            throw err;
+          });
       });
     })
     .then(function () {

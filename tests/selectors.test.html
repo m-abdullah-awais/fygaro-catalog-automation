@@ -364,6 +364,42 @@
       return 'two files';
     });
 
+    check('step 3: a clean gallery reports no complaint', function () {
+      ['add', 'edit-product'].forEach(function (name) {
+        var scope = mount(name);
+        assert(locate.galleryMessage(scope) === '',
+          name + ' reported "' + locate.galleryMessage(scope) + '"');
+      });
+      return 'the gallery says nothing of its own that reads as a refusal';
+    });
+
+    check('step 3: Fygaro refusing a picture is read back verbatim', function () {
+      // Fygaro judges a picture only after it has been handed over, so this is
+      // the one signal that the photo did not make it.
+      var scope = mount('add');
+      var box = locate.galleryInput(scope).closest('fieldset');
+      var complaint = document.createElement('p');
+      complaint.textContent = 'Image size exceeds 2.5MB';
+      box.appendChild(complaint);
+
+      assert(locate.galleryMessage(scope) === 'Image size exceeds 2.5MB',
+        'got "' + locate.galleryMessage(scope) + '"');
+      return 'Image size exceeds 2.5MB';
+    });
+
+    check('step 3: a refusal is picked out of the surrounding gallery text', function () {
+      var scope = mount('add');
+      var box = locate.galleryInput(scope).closest('fieldset');
+      var complaint = document.createElement('p');
+      complaint.textContent = 'Upload failed. Image size exceeds 2.5MB. Choose a smaller file.';
+      box.appendChild(complaint);
+
+      var got = locate.galleryMessage(scope);
+      assert(got.indexOf('exceeds 2.5MB') !== -1, 'the size complaint was lost: ' + got);
+      assert(got.indexOf('Click here') === -1, 'the whole panel leaked in: ' + got);
+      return got;
+    });
+
     check('step 3: setFiles reports failure rather than pretending', function () {
       var scope = mount('add');
       var input = locate.galleryInput(scope);
