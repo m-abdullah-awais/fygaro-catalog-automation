@@ -225,7 +225,7 @@ along, so a run that stops early keeps everything it had already captured.
 | **Update the original file** | Writes the links straight into the file you chose, as the run goes. |
 | **Download a copy at the end** | One download when the run stops. Nothing is written while it runs. |
 
-The first two save themselves about every 25 links, and again whenever the run stops for any reason:
+The first two save themselves about every 5 links, and again whenever the run stops for any reason:
 finished, stopped by hand, paused, or waiting for you. **Leave the side panel open** so it can, since that
 is where the workbook lives.
 

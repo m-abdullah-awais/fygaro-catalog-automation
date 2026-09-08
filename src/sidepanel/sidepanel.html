@@ -118,58 +118,13 @@
     </label>
   </section>
 
-  <!-- 3. Run -->
+  <!-- 3. Saving -->
   <section class="card">
-    <h2><span class="num">3</span> Run</h2>
+    <h2><span class="num">3</span> Saving</h2>
 
-    <div class="row-of-buttons">
-      <button type="button" class="primary" id="btnStart">Start</button>
-      <button type="button" id="btnPause">Pause</button>
-      <button type="button" class="danger" id="btnStop">Stop</button>
-    </div>
-
-    <div class="progress"><i id="progressBar"></i></div>
-    <div class="progress-meta">
-      <span id="progressText">Nothing loaded yet</span>
-      <span id="etaText"></span>
-    </div>
-
-    <div class="current hidden" id="currentCard">
-      <div class="code" id="currentCode"></div>
-      <div class="title" id="currentName"></div>
-      <div class="steps" id="stepDots"></div>
-      <div class="step-name" id="stepName"></div>
-    </div>
-
-    <p class="hint" id="runHint">Open Fygaro and sign in first, then press Start.</p>
-    <div class="row-of-buttons" style="margin-top:8px">
-      <button type="button" class="subtle" id="btnOpenFygaro">Open Fygaro</button>
-    </div>
-  </section>
-
-  <!-- 4. Results -->
-  <section class="card">
-    <h2><span class="num">4</span> Results</h2>
-
-    <div class="filters" id="filters">
-      <button type="button" class="chip" data-filter="all" aria-pressed="true">All</button>
-      <button type="button" class="chip" data-filter="done" aria-pressed="false">Done</button>
-      <button type="button" class="chip" data-filter="pending" aria-pressed="false">Pending</button>
-      <button type="button" class="chip" data-filter="skipped" aria-pressed="false">Skipped</button>
-      <button type="button" class="chip" data-filter="failed" aria-pressed="false">Failed</button>
-    </div>
-
-    <input type="text" id="search" placeholder="Search by code or name" aria-label="Search rows">
-    <div class="results" id="results" style="margin-top:8px"></div>
-    <p class="hint" id="resultsMeta"></p>
-  </section>
-
-  <!-- 5. Saving -->
-  <section class="card">
-    <h2><span class="num">5</span> Saving</h2>
-
-    <p class="hint" style="margin-top:0">Choose this before you start. The spreadsheet is then written for
-      you as the run goes along, so a run that stops early keeps everything it had already captured.</p>
+    <p class="hint" style="margin-top:0">Decide where the links go before you start the run below. The
+      spreadsheet is then written for you as the run goes along, so a run that stops early keeps
+      everything it had already captured.</p>
 
     <div class="destination" role="radiogroup" aria-label="Where to save the links">
       <label class="toggle">
@@ -211,6 +166,52 @@
     </div>
     <p class="hint" id="exportHint">Links are saved as soon as each one is created, so you can export at
       any point without waiting for the whole run to finish.</p>
+  </section>
+
+  <!-- 4. Run -->
+  <section class="card">
+    <h2><span class="num">4</span> Run</h2>
+
+    <div class="row-of-buttons">
+      <button type="button" class="primary" id="btnStart">Start</button>
+      <button type="button" id="btnPause">Pause</button>
+      <button type="button" class="danger" id="btnStop">Stop</button>
+    </div>
+
+    <div class="progress"><i id="progressBar"></i></div>
+    <div class="progress-meta">
+      <span id="progressText">Nothing loaded yet</span>
+      <span id="etaText"></span>
+    </div>
+
+    <div class="current hidden" id="currentCard">
+      <div class="code" id="currentCode"></div>
+      <div class="title" id="currentName"></div>
+      <div class="steps" id="stepDots"></div>
+      <div class="step-name" id="stepName"></div>
+    </div>
+
+    <p class="hint" id="runHint">Open Fygaro and sign in first, then press Start.</p>
+    <div class="row-of-buttons" style="margin-top:8px">
+      <button type="button" class="subtle" id="btnOpenFygaro">Open Fygaro</button>
+    </div>
+  </section>
+
+  <!-- 5. Results -->
+  <section class="card">
+    <h2><span class="num">5</span> Results</h2>
+
+    <div class="filters" id="filters">
+      <button type="button" class="chip" data-filter="all" aria-pressed="true">All</button>
+      <button type="button" class="chip" data-filter="done" aria-pressed="false">Done</button>
+      <button type="button" class="chip" data-filter="pending" aria-pressed="false">Pending</button>
+      <button type="button" class="chip" data-filter="skipped" aria-pressed="false">Skipped</button>
+      <button type="button" class="chip" data-filter="failed" aria-pressed="false">Failed</button>
+    </div>
+
+    <input type="text" id="search" placeholder="Search by code or name" aria-label="Search rows">
+    <div class="results" id="results" style="margin-top:8px"></div>
+    <p class="hint" id="resultsMeta"></p>
   </section>
 
   <!-- 6. Start over -->

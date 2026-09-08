@@ -1045,7 +1045,7 @@
         $('targetOriginal').dispatchEvent(new Event('change'));
         assert($('btnExportXlsx').textContent === 'Save now',
           'the button should say what it will do, it says "' + $('btnExportXlsx').textContent + '"');
-        assert(/every \d+ links/.test($('saveTargetStatus').textContent),
+        assert(/every \d+ links and whenever the run stops/.test($('saveTargetStatus').textContent),
           'the card should say it saves as it goes: ' + $('saveTargetStatus').textContent);
 
         return readState().then(function (data) {
@@ -1103,8 +1103,9 @@
         $('targetCopy').dispatchEvent(new Event('change'));
         assert($('btnExportXlsx').textContent === 'Download updated .xlsx',
           'the button should change back, it says "' + $('btnExportXlsx').textContent + '"');
-        assert(/finishes/.test($('saveTargetStatus').textContent),
-          'the card should say a copy only saves at the end: ' + $('saveTargetStatus').textContent);
+        // A download has nothing to add beyond what the option itself says.
+        assert($('saveTargetStatus').textContent === '',
+          'the status line should stay quiet for a download: ' + $('saveTargetStatus').textContent);
 
         $('btnExportXlsx').click();
         return waitUntil(function () { return recorded.downloads.length > 0; }, 'the copy to download', 20000)

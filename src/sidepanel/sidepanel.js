@@ -49,12 +49,15 @@
   var lastStatus = '';
 
   /*
-   * How often the sheet is rewritten during a run. A save of this workbook takes
-   * a few seconds, and a run is thousands of rows, so saving every row would
-   * spend longer writing than working. Twenty five rows is a few minutes of
-   * exposure at the pace this runs at.
+   * How often the sheet is rewritten during a run.
+   *
+   * Five links is about four minutes of work at the pace this runs at, so that
+   * is the most a crash can cost. Writing this workbook takes roughly three
+   * seconds, which over a full catalog adds up to about twenty minutes against
+   * a run measured in tens of hours: worth paying to never lose more than a
+   * handful of links.
    */
-  var AUTOSAVE_EVERY = 25;
+  var AUTOSAVE_EVERY = 5;
 
   /* Columns this sheet does not have and the export therefore has to create,
    * along with the headers to write above them. Empty when the sheet already
@@ -951,13 +954,15 @@
     setHidden($('btnChooseOutput'), where.mode !== 'newfile');
     $('btnChooseOutput').textContent = outputHandle ? 'Choose a different file' : 'Choose where to save';
 
-    $('saveTargetStatus').textContent = where.mode === 'copy'
-      ? 'One download when the run finishes. Nothing is written while it runs, so stopping early leaves ' +
-        'the links in this panel only.'
-      : (where.handle
-        ? 'Saved for you about every ' + AUTOSAVE_EVERY + ' links, and again when the run finishes. ' +
-          'Leave this panel open so it can.'
-        : 'No destination chosen yet, so nothing can be saved automatically.');
+    /*
+     * This line reports the destination as it actually stands, so it must not
+     * repeat what the chosen option already says above it. For a download there
+     * is nothing left to add, so it says nothing.
+     */
+    $('saveTargetStatus').textContent = where.handle
+      ? 'Saving into ' + U.truncate(where.handle.name || fileName, 40) + ', about every ' +
+        AUTOSAVE_EVERY + ' links and whenever the run stops. Leave this panel open so it can.'
+      : (where.mode === 'newfile' ? 'Pick a file above before you start.' : '');
 
     $('btnExportXlsx').textContent = where.mode === 'copy'
       ? 'Download updated .xlsx'
