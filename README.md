@@ -216,20 +216,32 @@ written on the first export if the sheet does not already have them. Column `H` 
 touched, and the table definition is left exactly as it is, so Excel opens the result without offering to
 repair it.
 
-You choose where the links go:
+**Choose the destination before you start.** The spreadsheet is then written for you as the run goes
+along, so a run that stops early keeps everything it had already captured.
 
 | Option | What happens |
 |--------|--------------|
-| **Save into a copy** (default) | Downloads a new `.xlsx`. Your original file is never touched. |
-| **Update the original file** | Writes the links straight into the file you chose, in place. |
+| **Save into a new file** | Pick where it goes once. Kept up to date from then on, original untouched. |
+| **Update the original file** | Writes the links straight into the file you chose, as the run goes. |
+| **Download a copy at the end** | One download when the run stops. Nothing is written while it runs. |
+
+The first two save themselves about every 25 links, and again whenever the run stops for any reason:
+finished, stopped by hand, paused, or waiting for you. **Leave the side panel open** so it can, since that
+is where the workbook lives.
 
 | Button | Produces |
 |--------|----------|
-| Save links to .xlsx | Either of the two above, depending on the option selected |
+| Save now | Writes immediately, without waiting for the next automatic save |
 | Download CSV | Sheet row, Código, Servicios and Link, for pasting anywhere |
 | Copy links | The same data on your clipboard, tab separated |
 
-**Updating the original** needs the browser to grant write access to that exact file, which only the file
+**Writing to a file** needs the browser to grant write access, and it only asks about that while you are
+clicking. Permission is therefore requested when you choose the destination and again when you press
+Start, never in the middle of a save. Asking later cannot work: rebuilding this workbook takes several
+seconds, which is longer than Chrome keeps a click alive, and the request is refused with *"Permission to
+write to the file was not granted"* on a file you had only just chosen.
+
+**Updating the original** needs that access to the catalog file itself, which only the file
 picker can do. Use the **Choose your catalog** button rather than dragging the file in, and the option
 becomes available. Dragging still works, and Chrome hands over a handle for drops too where it can. If the
 option stays greyed out, the text under it says why.
@@ -355,7 +367,7 @@ npm run lint       # syntax, house rules, and manifest references
 | `tests/xlsx.test.mjs` | 14 | ZIP round trips, style preservation, XML escaping, writing a column the sheet has no cells for, and that an unedited rewrite reproduces all 66 parts byte for byte |
 | `tests/selectors.test.html` | 61 | Every locator, run against the nine captured page snapshots, plus the steps waiting for controls that render late |
 | `tests/xlsx.test.html` | 26 | Workbook reading, sheet and column detection, the drawing that anchors the photos, patch and re read |
-| `tests/integration.test.html` | 33 | The real side panel driving the real worker through a full run |
+| `tests/integration.test.html` | 35 | The real side panel driving the real worker through a full run |
 
 The integration suite is the interesting one. It stubs the Chrome APIs, loads the actual worker and the
 actual panel, then plays a run through: 699 rows loaded, all seven steps walked for several rows, a failure

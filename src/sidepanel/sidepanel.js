@@ -28,8 +28,33 @@
    * chrome.storage because they are not JSON, so they live in IndexedDB. */
   var fileHandle = null;
 
-  /* Confirmation of the last successful save, shown in the Export card. */
+  /* Confirmation of the last successful save, shown in the Saving card. */
   var lastSaveMessage = '';
+
+  /*
+   * Where saves go, when the browser gave us somewhere to write.
+   *
+   * For "update the original" this is the catalog handle itself. For "save into
+   * a new file" it is a file the user picked once, which is what lets the sheet
+   * be kept up to date without asking again. Downloading a copy has no handle,
+   * so it can only happen at the end.
+   */
+  var outputHandle = null;
+
+  /* How many links were in the sheet the last time it was written. */
+  var savedLinkCount = -1;
+  var saving = false;
+
+  /* The run status at the previous render, so leaving a run can be noticed. */
+  var lastStatus = '';
+
+  /*
+   * How often the sheet is rewritten during a run. A save of this workbook takes
+   * a few seconds, and a run is thousands of rows, so saving every row would
+   * spend longer writing than working. Twenty five rows is a few minutes of
+   * exposure at the pace this runs at.
+   */
+  var AUTOSAVE_EVERY = 25;
 
   /* Columns this sheet does not have and the export therefore has to create,
    * along with the headers to write above them. Empty when the sheet already
@@ -207,16 +232,52 @@
     return typeof window.showOpenFilePicker === 'function';
   }
 
-  /** Whether the handle we hold is still allowed to be written to. */
-  function handleWritable(prompt) {
-    if (!fileHandle || !fileHandle.queryPermission) return Promise.resolve(false);
-    return fileHandle.queryPermission({ mode: 'readwrite' }).then(function (state) {
+  /**
+   * Whether a handle may be written to, optionally asking for permission.
+   *
+   * Asking MUST happen while a click is still being handled. Chrome only allows
+   * requestPermission during a live user activation, which lasts a few seconds,
+   * and this workbook takes longer than that to rebuild. Asking after the file
+   * had been prepared is exactly why "Permission to write to the file was not
+   * granted" appeared on a file the user had just chosen.
+   */
+  function canWriteTo(handle, ask) {
+    if (!handle || !handle.queryPermission) return Promise.resolve(false);
+    return handle.queryPermission({ mode: 'readwrite' }).then(function (state) {
       if (state === 'granted') return true;
-      if (!prompt || !fileHandle.requestPermission) return false;
-      return fileHandle.requestPermission({ mode: 'readwrite' }).then(function (asked) {
+      if (!ask || !handle.requestPermission) return false;
+      return handle.requestPermission({ mode: 'readwrite' }).then(function (asked) {
         return asked === 'granted';
       });
     }).catch(function () { return false; });
+  }
+
+  function rememberOutputHandle(handle) {
+    outputHandle = handle;
+    if (!handle) {
+      return FYG.idb.run('handles', 'readwrite', function (store) {
+        return store.delete('output');
+      }).catch(function () {});
+    }
+    return FYG.idb.run('handles', 'readwrite', function (store) {
+      return store.put(handle, 'output');
+    }).catch(function () {});
+  }
+
+  function restoreOutputHandle() {
+    return FYG.idb.run('handles', 'readonly', function (store) {
+      return store.get('output');
+    }).then(function (handle) {
+      if (!outputHandle) outputHandle = handle || null;
+      return outputHandle;
+    }).catch(function () { return null; });
+  }
+
+  /** The destination the user picked, and the handle it writes through. */
+  function destination() {
+    if ($('targetOriginal').checked) return { mode: 'original', handle: fileHandle };
+    if ($('targetNewFile').checked) return { mode: 'newfile', handle: outputHandle };
+    return { mode: 'copy', handle: null };
   }
 
   /* -------------------------------------------------------- catalog parsing */
@@ -866,17 +927,41 @@
     $('targetOriginal').disabled = !canOverwrite;
     if (!canOverwrite && $('targetOriginal').checked) $('targetCopy').checked = true;
 
+    var canPickOutput = typeof window.showSaveFilePicker === 'function';
+    $('targetNewFile').disabled = !canPickOutput;
+    if (!canPickOutput && $('targetNewFile').checked) $('targetCopy').checked = true;
+
     $('targetOriginalNote').textContent = canOverwrite
       ? 'Writes the links straight into ' + U.truncate(fileName, 44) + '. Close it in Excel first, or ' +
         'the write will fail.'
       : (canPickHandles()
         ? 'Not available for this file. Choose it again with the Choose your catalog button, rather than ' +
           'dropping it, so the browser can grant write access.'
-        : 'Not available in this browser. Only saving into a copy is possible here.');
+        : 'Not available in this browser. Only downloading a copy is possible here.');
 
-    $('btnExportXlsx').textContent = $('targetOriginal').checked
-      ? 'Update the original file'
-      : 'Download updated .xlsx';
+    $('targetNewFileNote').textContent = !canPickOutput
+      ? 'Not available in this browser. Only downloading a copy is possible here.'
+      : (outputHandle
+        ? 'Keeping ' + U.truncate(outputHandle.name || 'the file you chose', 44) + ' up to date. Your ' +
+          'original file is never touched.'
+        : 'Pick where it goes once, and it is kept up to date from then on. Your original file is never ' +
+          'touched.');
+
+    var where = destination();
+    setHidden($('btnChooseOutput'), where.mode !== 'newfile');
+    $('btnChooseOutput').textContent = outputHandle ? 'Choose a different file' : 'Choose where to save';
+
+    $('saveTargetStatus').textContent = where.mode === 'copy'
+      ? 'One download when the run finishes. Nothing is written while it runs, so stopping early leaves ' +
+        'the links in this panel only.'
+      : (where.handle
+        ? 'Saved for you about every ' + AUTOSAVE_EVERY + ' links, and again when the run finishes. ' +
+          'Leave this panel open so it can.'
+        : 'No destination chosen yet, so nothing can be saved automatically.');
+
+    $('btnExportXlsx').textContent = where.mode === 'copy'
+      ? 'Download updated .xlsx'
+      : 'Save now';
 
     if (!ready) {
       $('exportHint').textContent = 'Nothing to save yet. Links appear here as each one is created.';
@@ -920,8 +1005,13 @@
 
   function refresh() {
     return S.read().then(function (data) {
+      var previous = lastStatus;
       view = data;
       render();
+      // Every state change is a chance to have captured more links, which is
+      // exactly when the sheet is worth writing again.
+      lastStatus = data.run.status;
+      maybeAutosave(previous);
       return data;
     });
   }
@@ -940,48 +1030,17 @@
   }
 
   /** Writes the produced workbook straight back into the file on disk. */
-  function saveOverOriginal(blob, updates) {
-    return handleWritable(true).then(function (allowed) {
-      if (!allowed) {
-        throw new Error('Permission to write to the file was not granted. Choose the file again, or ' +
-          'save into a copy instead.');
-      }
-      return fileHandle.createWritable();
-    }).then(function (writable) {
-      // createWritable buffers and only commits on close, so a failure part way
-      // through does not leave a half written spreadsheet on disk.
-      return writable.write(blob).then(function () { return writable.close(); });
-    }).then(function () {
-      note('success', 'Wrote ' + updates.length + ' links into ' + fileName + '.');
-      // Confirmed in place rather than through a modal, so a long run does not
-      // stop dead behind a dialog nobody is there to dismiss.
-      lastSaveMessage = 'Updated ' + fileName + ' with ' + updates.length + ' link' +
-        (updates.length === 1 ? '' : 's') + ' at ' + U.clockTime() + '.';
-    });
-  }
 
-  function exportXlsx() {
-    if (!workbook) return;
+  /** What the sheet needs written into it, or null when there is nothing yet. */
+  function buildBatches() {
     var file = view.run.file || {};
     var column = file.mapping && file.mapping.link;
-    var sheetName = file.sheetName || $('sheetSelect').value;
-    var toOriginal = $('targetOriginal').checked && !!fileHandle;
-
-    /*
-     * No silent fallback to a literal column. The last column of this catalog
-     * holds the product images, so guessing would write links underneath them.
-     */
-    if (!column) {
-      window.alert('There is no column to write the links into.\n\n' +
-        'Choose one under Link in the catalog card.');
-      return;
-    }
+    if (!column) return null;
 
     var updates = view.rows
       .filter(function (r) { return r.link; })
       .map(function (r) { return { row: r.sheetRow, value: r.link }; });
-
-    if (!updates.length) return;
+    if (!updates.length) return null;
 
     // A row that finished without a link says why, in the sheet rather than
     // only in the panel, so the reason is still there tomorrow.
@@ -998,27 +1057,178 @@
       batches.push({ column: file.noteColumn, updates: notes });
     }
 
-    if (toOriginal && !window.confirm('Write ' + updates.length + ' link' +
-      (updates.length === 1 ? '' : 's') + ' into ' + fileName + '?\n\n' +
-      'This replaces the file on your disk. Close it in Excel first. Everything else in the workbook is ' +
-      'kept exactly as it is.')) return;
+    return {
+      batches: batches,
+      links: updates.length,
+      sheetName: file.sheetName || $('sheetSelect').value
+    };
+  }
 
+  function writeThrough(handle, blob) {
+    // createWritable buffers and only commits on close, so a failure part way
+    // through does not leave a half written spreadsheet on disk.
+    return handle.createWritable().then(function (writable) {
+      return writable.write(blob).then(function () { return writable.close(); });
+    });
+  }
+
+  /**
+   * Writes the sheet to wherever the user chose.
+   *
+   * Permission is never requested from in here. Rebuilding this workbook takes
+   * seconds, which is longer than Chrome keeps a click alive, so a prompt raised
+   * at this point can only fail. That is exactly why "Permission to write to the
+   * file was not granted" appeared on a file that had just been chosen. It is
+   * asked for when the destination is picked and again when Start is pressed,
+   * both of which are real clicks.
+   *
+   * @param {boolean} silent an autosave, so nothing may pop up in front of
+   *   someone who is not watching
+   */
+  function saveWorkbook(silent) {
+    if (saving || !workbook) return Promise.resolve(false);
+
+    var plan = buildBatches();
+    if (!plan) {
+      if (!silent) {
+        window.alert('There is nothing to save yet.\n\n' +
+          'Links appear here as each one is created, and the column they go into is chosen in the ' +
+          'catalog card.');
+      }
+      return Promise.resolve(false);
+    }
+
+    var where = destination();
+    saving = true;
     $('btnExportXlsx').disabled = true;
-    X.writeColumns(workbook, sheetName, batches)
+
+    return X.writeColumns(workbook, plan.sheetName, plan.batches)
       .then(function (blob) {
-        if (toOriginal) return saveOverOriginal(blob, updates);
-        download(blob, X.exportName(fileName || file.name));
-        note('success', 'Saved ' + updates.length + ' links into a new copy of the workbook.');
-        return null;
+        if (!where.handle) {
+          download(blob, X.exportName(fileName || 'catalogo.xlsx'));
+          note('success', 'Saved ' + plan.links + ' links into a downloaded copy of the workbook.');
+          return true;
+        }
+        return canWriteTo(where.handle, false).then(function (allowed) {
+          if (!allowed) {
+            throw new Error('Permission to write to that file is no longer granted. Choose the ' +
+              'destination again under Saving.');
+          }
+          return writeThrough(where.handle, blob);
+        }).then(function () {
+          note('success', 'Wrote ' + plan.links + ' links into ' + (where.handle.name || fileName) + '.');
+          return true;
+        });
+      })
+      .then(function (ok) {
+        if (!ok) return false;
+        savedLinkCount = plan.links;
+        // Confirmed in place rather than through a modal, so a long run does not
+        // stop dead behind a dialog nobody is there to dismiss.
+        lastSaveMessage = 'Saved ' + plan.links + ' link' + (plan.links === 1 ? '' : 's') +
+          ' at ' + U.clockTime() + '.';
+        return true;
       })
       .catch(function (err) {
         var message = err && err.message ? err.message : String(err);
-        note('error', 'The workbook could not be saved: ' + message);
-        window.alert((toOriginal ? 'The original file could not be updated.'
-          : 'The updated file could not be created.') + '\n\n' + message +
-          (toOriginal ? '\n\nIf the file is open in Excel, close it and try again.' : ''));
+        note('error', 'The spreadsheet could not be saved: ' + message);
+        lastSaveMessage = 'Could not save at ' + U.clockTime() + '. ' + message;
+        if (!silent) {
+          window.alert((where.mode === 'copy' ? 'The updated file could not be created.'
+            : 'The spreadsheet could not be updated.') + '\n\n' + message +
+            (where.mode === 'copy' ? '' : '\n\nIf the file is open in Excel, close it and try again.'));
+        }
+        return false;
       })
-      .then(function () { renderExport(view.rows); });
+      .then(function (ok) {
+        saving = false;
+        renderExport(view.rows);
+        return ok;
+      });
+  }
+
+  /**
+   * Saves without being asked, so a run that stops early keeps its work.
+   *
+   * Links are held in the panel from the moment they are captured, but nobody
+   * watching a run of this length should have to know that, nor be the thing
+   * standing between hours of work and a saved file.
+   */
+  function maybeAutosave(previous) {
+    if (saving || !workbook) return;
+
+    var where = destination();
+    var links = view.rows.filter(function (r) { return r.link; }).length;
+    if (!links || links === savedLinkCount) return;
+
+    /*
+     * A run that stops for any reason is a moment worth saving: finished,
+     * stopped by hand, paused, or waiting for someone. Stopping is measured as a
+     * transition rather than a state, so simply reopening the panel on an old
+     * run does not rewrite the file, or worse, download another copy.
+     */
+    var stopped = previous === S.STATUS.RUNNING && view.run.status !== S.STATUS.RUNNING;
+
+    // A download cannot happen every few rows without burying the user in
+    // files, so that destination saves once, when the run stops.
+    if (!where.handle) {
+      if (stopped) saveWorkbook(true);
+      return;
+    }
+
+    if (stopped || links - Math.max(savedLinkCount, 0) >= AUTOSAVE_EVERY) saveWorkbook(true);
+  }
+
+  /**
+   * Confirms the chosen destination can actually be written to.
+   *
+   * Called straight out of a click, because a live click is the only time Chrome
+   * will show the permission prompt.
+   */
+  function ensureDestinationReady() {
+    var where = destination();
+    if (where.mode === 'copy') return Promise.resolve(true);
+
+    if (!where.handle) {
+      window.alert('Choose where to save first.\n\n' +
+        'Under Saving, pick the file to write into, or switch to downloading a copy at the end.');
+      return Promise.resolve(false);
+    }
+
+    return canWriteTo(where.handle, true).then(function (allowed) {
+      if (allowed) return true;
+      window.alert('Permission to write to that file was not granted.\n\n' +
+        'Choose the destination again under Saving, or switch to downloading a copy at the end.');
+      return false;
+    });
+  }
+
+  /** Picks a file to keep up to date, once, before the run starts. */
+  function chooseOutputFile() {
+    if (typeof window.showSaveFilePicker !== 'function') {
+      window.alert('This browser cannot save into a file you choose.\n\n' +
+        'Use "Download a copy at the end" instead.');
+      return Promise.resolve(false);
+    }
+
+    return window.showSaveFilePicker({
+      suggestedName: X.exportName(fileName || 'catalogo.xlsx'),
+      types: [{
+        description: 'Excel workbook',
+        accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] }
+      }]
+    }).then(function (handle) {
+      return rememberOutputHandle(handle).then(function () {
+        savedLinkCount = -1;
+        note('info', 'The spreadsheet will be kept up to date in ' + handle.name + ' as the run goes along.');
+        renderExport(view.rows);
+        return true;
+      });
+    }).catch(function () {
+      // Cancelling the picker is an ordinary thing to do, not a failure.
+      renderExport(view.rows);
+      return false;
+    });
   }
 
   function exportCsv() {
@@ -1171,13 +1381,24 @@
 
     $('btnStart').addEventListener('click', function () {
       var resumable = view.run.status === S.STATUS.PAUSED || view.run.status === S.STATUS.ATTENTION;
-      pushSettings()
+
+      // Asked for here, in the click, because Chrome only shows the permission
+      // prompt while one is still being handled. Finding out hours later that
+      // the sheet cannot be written is the failure this exists to prevent.
+      ensureDestinationReady().then(function (ready) {
+        if (!ready) return null;
+        return startRun(resumable);
+      });
+    });
+
+    function startRun(resumable) {
+      return pushSettings()
         .then(function () { return send(resumable ? S.MSG.RESUME : S.MSG.START); })
         .then(function (result) {
           if (result && result.ok === false && result.error) window.alert(result.error);
           return refresh();
         });
-    });
+    }
 
     $('btnPause').addEventListener('click', function () { send(S.MSG.PAUSE).then(refresh); });
     $('btnStop').addEventListener('click', function () { send(S.MSG.STOP).then(refresh); });
@@ -1229,14 +1450,25 @@
       // chrome.storage, so clearing that alone would leave them on disk while
       // telling the user everything had gone.
       forgetHandle();
+      rememberOutputHandle(null);
+      savedLinkCount = -1;
       FYG.idb.clearStore('workbook');
       FYG.idb.clearStore('images');
       imageIndex = null;
       send(S.MSG.RESET).then(refresh);
     });
 
-    ['targetCopy', 'targetOriginal'].forEach(function (id) {
-      $(id).addEventListener('change', function () { renderExport(view.rows); });
+    ['targetCopy', 'targetOriginal', 'targetNewFile'].forEach(function (id) {
+      $(id).addEventListener('change', function () {
+        savedLinkCount = -1;
+        renderExport(view.rows);
+
+        // Both of these need a live click, which this is. Asking now means the
+        // run cannot get hours in and then discover it has nowhere to write.
+        if (id === 'targetNewFile' && !outputHandle) return chooseOutputFile();
+        if (id === 'targetOriginal' && fileHandle) return canWriteTo(fileHandle, true);
+        return null;
+      });
     });
 
     $('filters').addEventListener('click', function (e) {
@@ -1254,7 +1486,8 @@
       renderResults(view.run, view.rows);
     });
 
-    $('btnExportXlsx').addEventListener('click', exportXlsx);
+    $('btnExportXlsx').addEventListener('click', function () { saveWorkbook(false); });
+    $('btnChooseOutput').addEventListener('click', chooseOutputFile);
     $('btnExportCsv').addEventListener('click', exportCsv);
     $('btnCopyLinks').addEventListener('click', copyLinks);
 
@@ -1282,6 +1515,7 @@
   // The file handle comes back first, so the panel knows straight away whether
   // updating the original file is possible for the workbook it is about to load.
   restoreHandle()
+    .then(restoreOutputHandle)
     .then(restoreWorkbook)
     .then(function (wb) {
       if (!wb) return null;

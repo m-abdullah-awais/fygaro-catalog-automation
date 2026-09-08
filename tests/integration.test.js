@@ -966,6 +966,75 @@
     })
 
     .then(function () {
+      return check('the sheet saves itself as the run goes, with nothing clicked', function () {
+        /*
+         * The whole point. Links exist in Fygaro the moment they are created,
+         * and a run of this length that ends without writing them anywhere is
+         * hours of work sitting in a panel nobody can read.
+         */
+        savedToDisk = null;
+        handlePermission = 'granted';
+        $('targetOriginal').checked = true;
+        $('targetOriginal').dispatchEvent(new Event('change'));
+
+        return readState().then(function (before) {
+          var links = before.rows.filter(function (r) { return r.link; }).length;
+          assert(links > 0, 'the run should have captured links by now');
+
+          // Run, then stop, because a run leaving the running state is when a
+          // save is owed however few links arrived since the last one.
+          return chrome.runtime.sendMessage({ type: S.MSG.START })
+            .then(function () { return waitUntil(function () {
+              return store[S.KEY_RUN] && store[S.KEY_RUN].status === S.STATUS.RUNNING;
+            }, 'the run to start'); })
+            .then(function () { return chrome.runtime.sendMessage({ type: S.MSG.STOP }); })
+            .then(function () { return waitUntil(function () { return savedToDisk; },
+              'the sheet to be written without being asked', 20000); })
+            .then(function () { return savedToDisk.arrayBuffer(); })
+            .then(function (buffer) { return X.load(new Uint8Array(buffer)); })
+            .then(function (wb) {
+              var byRow = {};
+              wb.readSheet(SHEET).rows.forEach(function (r) { byRow[r.r] = r.cells; });
+              before.rows.filter(function (r) { return r.link; }).forEach(function (row) {
+                assert(byRow[row.sheetRow].I === row.link,
+                  'sheet row ' + row.sheetRow + ' holds "' + byRow[row.sheetRow].I + '"');
+              });
+              assert(byRow[1].I === 'Link', 'the header was not written');
+              return links + ' links written with no button pressed';
+            });
+        });
+      });
+    })
+
+    .then(function () {
+      return check('Start refuses to run when the destination cannot be written to', function () {
+        /*
+         * Asked for up front, while the click is still live, because Chrome only
+         * shows the permission prompt then. Discovering it hours later, with the
+         * products already created, is the failure this prevents.
+         */
+        handlePermission = 'denied';
+        recorded.alerts.length = 0;
+        $('targetOriginal').checked = true;
+
+        return Promise.resolve()
+          .then(function () { $('btnStart').click(); })
+          .then(function () { return waitUntil(function () { return recorded.alerts.length > 0; },
+            'the refusal to be reported'); })
+          .then(readState)
+          .then(function (data) {
+            var said = recorded.alerts[recorded.alerts.length - 1];
+            assert(/Permission to write/.test(said), 'unhelpful message: ' + said);
+            assert(/Saving/.test(said), 'it should point at where to fix it: ' + said);
+            assert(data.run.status !== S.STATUS.RUNNING,
+              'the run started anyway, with nowhere to save to');
+            handlePermission = 'granted';
+            return 'refused before creating anything';
+          });
+      });
+    })
+
+    .then(function () {
       return check('updating the original writes to the file itself, with no download', function () {
         savedToDisk = null;
         recorded.downloads.length = 0;
@@ -974,8 +1043,10 @@
 
         $('targetOriginal').checked = true;
         $('targetOriginal').dispatchEvent(new Event('change'));
-        assert($('btnExportXlsx').textContent === 'Update the original file',
+        assert($('btnExportXlsx').textContent === 'Save now',
           'the button should say what it will do, it says "' + $('btnExportXlsx').textContent + '"');
+        assert(/every \d+ links/.test($('saveTargetStatus').textContent),
+          'the card should say it saves as it goes: ' + $('saveTargetStatus').textContent);
 
         return readState().then(function (data) {
           var done = data.rows.filter(function (r) { return r.status === S.ROW.DONE; });
@@ -985,9 +1056,6 @@
             .then(function () {
               assert(recorded.downloads.length === 0,
                 'updating the original must not also download a copy');
-              var asked = recorded.confirms[recorded.confirms.length - 1];
-              assert(/replaces the file on your disk/.test(asked),
-                'the confirmation should be explicit, it said: ' + asked);
               return savedToDisk.arrayBuffer();
             })
             .then(function (buffer) { return X.load(new Uint8Array(buffer)); })
@@ -1035,6 +1103,8 @@
         $('targetCopy').dispatchEvent(new Event('change'));
         assert($('btnExportXlsx').textContent === 'Download updated .xlsx',
           'the button should change back, it says "' + $('btnExportXlsx').textContent + '"');
+        assert(/finishes/.test($('saveTargetStatus').textContent),
+          'the card should say a copy only saves at the end: ' + $('saveTargetStatus').textContent);
 
         $('btnExportXlsx').click();
         return waitUntil(function () { return recorded.downloads.length > 0; }, 'the copy to download', 20000)

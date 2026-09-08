@@ -164,16 +164,20 @@
     <p class="hint" id="resultsMeta"></p>
   </section>
 
-  <!-- 5. Export -->
+  <!-- 5. Saving -->
   <section class="card">
-    <h2><span class="num">5</span> Export</h2>
+    <h2><span class="num">5</span> Saving</h2>
+
+    <p class="hint" style="margin-top:0">Choose this before you start. The spreadsheet is then written for
+      you as the run goes along, so a run that stops early keeps everything it had already captured.</p>
 
     <div class="destination" role="radiogroup" aria-label="Where to save the links">
       <label class="toggle">
-        <input type="radio" name="saveTarget" id="targetCopy" value="copy" checked>
+        <input type="radio" name="saveTarget" id="targetNewFile" value="newfile">
         <span class="text">
-          <strong>Save into a copy</strong>
-          <small>Downloads a new .xlsx and leaves your original file exactly as it is.</small>
+          <strong>Save into a new file</strong>
+          <small id="targetNewFileNote">Pick where it goes once, and it is kept up to date from then on.
+            Your original file is never touched.</small>
         </span>
       </label>
       <label class="toggle">
@@ -184,7 +188,21 @@
             Excel first, or the write will fail.</small>
         </span>
       </label>
+      <label class="toggle">
+        <input type="radio" name="saveTarget" id="targetCopy" value="copy" checked>
+        <span class="text">
+          <strong>Download a copy at the end</strong>
+          <small>One download when the run finishes. Nothing is written as it goes, so a run that stops
+            early leaves the links in the panel only.</small>
+        </span>
+      </label>
     </div>
+
+    <div class="row-of-buttons" style="margin-top:12px">
+      <button type="button" id="btnChooseOutput" class="hidden">Choose where to save</button>
+    </div>
+
+    <p class="hint" id="saveTargetStatus"></p>
 
     <div class="row-of-buttons" style="margin-top:12px">
       <button type="button" class="primary" id="btnExportXlsx">Save links to .xlsx</button>
