@@ -28,7 +28,10 @@
     dashboard: /^\/(?:en|es)\/app\/dashboard\/?$/
   };
 
-  var LINK_PATTERN = /^https?:\/\/[^\s]*\/pb\/[0-9a-f-]{36}\/?$/i;
+  // Shared with the sheet reader in the side panel. Capturing a link and
+  // recognising one already in the spreadsheet have to agree, or a row the
+  // panel calls unlinked gets created in Fygaro a second time.
+  var LINK_PATTERN = U.LINK_PATTERN;
 
   /* Legends the product form uses over its picture gallery, folded for matching. */
   var GALLERY_LEGENDS = ['gallery', 'galeria', 'imagenes', 'images', 'fotos'];

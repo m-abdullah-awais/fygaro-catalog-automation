@@ -60,20 +60,36 @@
     });
   }
 
-  /** Mirrors the row building in src/sidepanel/sidepanel.js. */
-  function buildRows(sheetData, header, mapping) {
+  /*
+   * Mirrors the row building in src/sidepanel/sidepanel.js, including the rule
+   * that decides a row is already done. The panel version also carries the row
+   * range and the zero price check, which nothing here exercises.
+   */
+  function linkAnywhereIn(cells) {
+    for (var col in cells) {
+      if (!Object.prototype.hasOwnProperty.call(cells, col)) continue;
+      var found = U.fygaroLink(cells[col]);
+      if (found) return found;
+    }
+    return '';
+  }
+
+  function buildRows(sheetData, header, mapping, searchWholeRow) {
     var rows = [];
     sheetData.rows.forEach(function (r) {
       if (r.r <= header.headerRow) return;
       var name = U.normText(mapping.name ? r.cells[mapping.name] : '');
       var code = U.normText(mapping.code ? r.cells[mapping.code] : '');
       var priceRaw = U.normText(mapping.price ? r.cells[mapping.price] : '');
-      var link = U.normText(mapping.link ? r.cells[mapping.link] : '');
       if (!name && !code) return;
+      var linkCell = U.normText(mapping.link ? r.cells[mapping.link] : '');
+      var link = U.fygaroLink(linkCell);
+      if (!link && searchWholeRow) link = linkAnywhereIn(r.cells);
       var parsed = FYG.price.parse(priceRaw);
       rows.push({
         sheetRow: r.r, name: name, code: code, priceRaw: priceRaw,
         priceText: parsed.ok ? parsed.text : '', link: link,
+        linkJunk: !link && !!linkCell,
         blocked: !link && (!name || !code || !parsed.ok)
       });
     });
@@ -417,6 +433,82 @@
             assert(withLink[0].sheetRow === 2, 'the link came back on row ' + withLink[0].sheetRow);
             assert(rows.length === 30, 'the header row leaked into the data: ' + rows.length + ' rows');
             return 'the Link header is found again and row 2 is skipped';
+          });
+      });
+    })
+    .then(function () {
+      return check('text in the Link column that is not a link does not retire the row', function () {
+        /*
+         * The Nota column sits one place past the Link column and says things
+         * like "Fuera del rango elegido". Reading any non empty cell as a link
+         * meant a mapping off by one column quietly retired every row in the
+         * sheet, and a run would report there was nothing left to do.
+         */
+        var link = 'https://www.fygaro.com/en/pb/44444444-4444-4444-4444-444444444444/';
+        return X.writeColumn(wb, SHEET, 'I', [
+          { row: 1, value: S.LINK_HEADER },
+          { row: 2, value: link },
+          { row: 3, value: 'Fuera del rango elegido (5 a 10).' },
+          { row: 4, value: 'Ya existe en Fygaro. Nothing was created and no link was captured.' },
+          { row: 5, value: 'pending' }
+        ])
+          .then(function (blob) { return blob.arrayBuffer(); })
+          .then(function (buffer) { return X.load(new Uint8Array(buffer)); })
+          .then(function (again) {
+            var data = again.readSheet(SHEET);
+            var reread = X.readHeader(data);
+            var rows = buildRows(data, reread, {
+              name: 'D', code: 'C', price: 'E', link: X.findColumn(reread, S.HEADERS.link)
+            });
+            var byRow = {};
+            rows.forEach(function (r) { byRow[r.sheetRow] = r; });
+
+            assert(byRow[2].link === link, 'row 2 should carry the link, saw "' + byRow[2].link + '"');
+            assert(!byRow[2].linkJunk, 'row 2 is a real link, not junk');
+            [3, 4, 5].forEach(function (n) {
+              assert(byRow[n].link === '', 'row ' + n + ' should carry no link, saw "' + byRow[n].link + '"');
+              assert(byRow[n].linkJunk, 'row ' + n + ' should be flagged as junk in the link column');
+            });
+
+            var withLink = rows.filter(function (r) { return r.link; });
+            assert(withLink.length === 1, withLink.length + ' rows counted as linked, expected 1');
+            return 'one real link kept, three notes rejected and left to do';
+          });
+      });
+    })
+    .then(function () {
+      return check('a link in another column is found only when no Link column exists', function () {
+        /*
+         * When the sheet has no Link column the mapping points at one that does
+         * not exist yet, so every cell under it reads as empty. A link written
+         * by an earlier run under a heading this build does not know would be
+         * invisible, and the row would go to Fygaro and come back refused for a
+         * duplicate code. Looking across the row closes that. It must not happen
+         * when a real Link column is present, or a link quoted anywhere else
+         * would retire a row that still needs doing.
+         */
+        var link = 'https://www.fygaro.com/en/pb/55555555-5555-5555-5555-555555555555/';
+        return X.writeColumn(wb, SHEET, 'P', [{ row: 5, value: link }])
+          .then(function (blob) { return blob.arrayBuffer(); })
+          .then(function (buffer) { return X.load(new Uint8Array(buffer)); })
+          .then(function (again) {
+            var data = again.readSheet(SHEET);
+            var reread = X.readHeader(data);
+            assert(X.findColumn(reread, S.HEADERS.link) === '', 'this sheet should still have no Link column');
+
+            // 'I' is what nextFreeColumn would propose. Nothing is under it.
+            var mapping = { name: 'D', code: 'C', price: 'E', link: 'I' };
+
+            var scanned = buildRows(data, reread, mapping, true);
+            var found = scanned.filter(function (r) { return r.link; });
+            assert(found.length === 1, found.length + ' rows found a stray link, expected 1');
+            assert(found[0].sheetRow === 5, 'the stray link came back on row ' + found[0].sheetRow);
+            assert(found[0].link === link, 'the link came back as "' + found[0].link + '"');
+
+            var plain = buildRows(data, reread, mapping, false);
+            assert(plain.filter(function (r) { return r.link; }).length === 0,
+              'without the scan no row should count as linked');
+            return 'row 5 recognised from column P, and ignored when a Link column is mapped';
           });
       });
     })

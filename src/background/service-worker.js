@@ -286,8 +286,21 @@ handlers[S.MSG.LOAD_CATALOG] = function (msg, bucket) {
   bucket.run.file = msg.file || null;
   bucket.run.stats = S.recount(rows);
 
-  log(bucket, 'info', 'Catalog loaded: ' + rows.length + ' rows, ' +
-    bucket.run.stats.toProcess + ' to process, ' + bucket.run.stats.skipped + ' already have a link.');
+  /*
+   * Counted by reason rather than off stats.skipped, which also holds the rows
+   * left for another batch. Reporting those as "already have a link" is how a
+   * run with a row range set looked like it had far more finished work behind it
+   * than it did.
+   */
+  var hadLink = rows.filter(function (r) { return r.reason === S.SKIP.HAD_LINK; }).length;
+  var outside = rows.filter(function (r) { return r.reason === S.SKIP.OUT_OF_RANGE; }).length;
+  var junk = (msg.rows || []).filter(function (r) { return r.linkJunk; }).length;
+
+  var loaded = 'Catalog loaded: ' + rows.length + ' rows, ' +
+    bucket.run.stats.toProcess + ' to process, ' + hadLink + ' already have a link';
+  if (outside) loaded += ', ' + outside + ' outside the chosen rows';
+  if (junk) loaded += ', ' + junk + ' with something in the link column that is not a Fygaro link';
+  log(bucket, 'info', loaded + '.');
   bucket.logDirty = true;
   return Promise.resolve({ ok: true });
 };

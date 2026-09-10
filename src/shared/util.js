@@ -85,6 +85,45 @@
     return m ? m[0].toLowerCase() : null;
   };
 
+  /*
+   * A Fygaro payment link, for example
+   * https://www.fygaro.com/en/pb/65df9668-0a2e-4c0b-a8f7-0789e47be346/
+   *
+   * This lives here rather than in the content script because two quite
+   * different places need the same answer: the step that reads a freshly
+   * generated link off the page, and the sheet reader deciding whether a row is
+   * already done. Two copies of this shape would drift, and the way they would
+   * drift is that one of them starts accepting something the other rejects,
+   * which is exactly how a row gets created in Fygaro twice.
+   *
+   * The host is not pinned. Fygaro serves the same button under /en/ and /es/,
+   * and a link pasted from a custom domain is still a link. What is pinned is
+   * the /pb/ path and a uuid shaped segment, which is enough to tell a real
+   * link apart from a note, a price, or a half typed cell.
+   */
+  U.LINK_PATTERN = /^https?:\/\/[^\s]*\/pb\/[0-9a-f-]{36}\/?$/i;
+
+  /** True when the whole value is a Fygaro payment link and nothing else. */
+  U.isFygaroLink = function (s) {
+    return U.LINK_PATTERN.test(U.normText(s));
+  };
+
+  /*
+   * The Fygaro link inside a value, or '' when there is not one.
+   *
+   * Tolerant on purpose. A cell that reads "Link: https://...fygaro.com/pb/x/"
+   * or carries a trailing full stop still means the row is done, and treating it
+   * as unlinked would send a product Fygaro already has back through the form.
+   * The link that comes back is the clean one, so what gets written to the sheet
+   * on export is the link and not the sentence around it.
+   */
+  U.fygaroLink = function (s) {
+    var text = U.normText(s);
+    if (U.LINK_PATTERN.test(text)) return text;
+    var m = /https?:\/\/\S*?\/pb\/[0-9a-f-]{36}\/?/i.exec(text);
+    return m ? m[0] : '';
+  };
+
   U.truncate = function (s, n) {
     s = String(s == null ? '' : s);
     return s.length <= n ? s : s.slice(0, Math.max(0, n - 1)) + '\u2026';

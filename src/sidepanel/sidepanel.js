@@ -403,11 +403,35 @@
     };
   }
 
+  /*
+   * The first Fygaro link anywhere in a sheet row, or ''.
+   *
+   * Only consulted when the sheet arrived without a Link column of its own, in
+   * which case the mapping points at a column that does not exist yet and every
+   * cell under it reads as empty. A link put there by an earlier run under a
+   * heading this build does not recognise, or pasted in by hand somewhere else,
+   * would otherwise be invisible, and the row would be sent to Fygaro only to be
+   * refused for a duplicate code tens of seconds later.
+   *
+   * It is deliberately not done when the sheet does have a Link column. There
+   * the mapping is the answer, and a link quoted inside a service description
+   * must not be allowed to skip a row that still needs doing.
+   */
+  function linkAnywhereIn(cells) {
+    for (var col in cells) {
+      if (!Object.prototype.hasOwnProperty.call(cells, col)) continue;
+      var found = U.fygaroLink(cells[col]);
+      if (found) return found;
+    }
+    return '';
+  }
+
   /** Turns the chosen sheet and column mapping into rows for the worker. */
   function buildRows(mapping) {
     var rows = [];
     var problems = 0;
     var range = currentRange();
+    var searchWholeRow = !!(proposed && proposed.link && mapping.link === proposed.link);
 
     sheetData.rows.forEach(function (r) {
       if (r.r <= headerInfo.headerRow) return;
@@ -415,8 +439,23 @@
       var name = U.normText(mapping.name ? r.cells[mapping.name] : '');
       var code = U.normText(mapping.code ? r.cells[mapping.code] : '');
       var priceRaw = U.normText(mapping.price ? r.cells[mapping.price] : '');
-      var link = U.normText(mapping.link ? r.cells[mapping.link] : '');
       if (!name && !code) return;
+
+      /*
+       * A row counts as done only when the cell really holds a Fygaro link.
+       * Any non empty text used to count, which cuts both ways and both ways
+       * are wrong: a note, a date or the word "pending" left in that column
+       * silently retired a row that never got a link, and the Nota column
+       * sitting one place over makes that an easy mapping slip to make.
+       */
+      var linkCell = U.normText(mapping.link ? r.cells[mapping.link] : '');
+      var link = U.fygaroLink(linkCell);
+      if (!link && searchWholeRow) link = linkAnywhereIn(r.cells);
+
+      // Something is in the link column, but it is not a link. The row is
+      // treated as still to do, and said out loud in the summary rather than
+      // quietly retired or quietly retried.
+      var linkJunk = !link && !!linkCell;
 
       var parsed = FYG.price.parse(priceRaw);
       if (!parsed.ok && !link) problems++;
@@ -442,6 +481,7 @@
         priceRaw: priceRaw,
         priceText: parsed.ok ? parsed.text : '',
         link: link,
+        linkJunk: linkJunk,
         // A row the automation cannot possibly complete is flagged now rather
         // than failing halfway through the run.
         outOfRange: outOfRange,
@@ -506,11 +546,18 @@
 
     var outside = built.rows.filter(function (r) { return r.outOfRange; }).length;
 
+    var junk = built.rows.filter(function (r) { return r.linkJunk; }).length;
+
     var summary = built.rows.length + ' rows found. ' +
       (built.rows.length - withLink - blocked - outside) + ' to process, ' +
       withLink + ' already have a link';
     if (blocked) summary += ', ' + blocked + ' cannot be processed';
     if (outside) summary += ', ' + outside + ' outside rows ' + chosen.from + ' to ' + chosen.to;
+    // Worth a word on screen. These rows are about to be processed, and if that
+    // column was meant to hold their links then processing them is wrong.
+    if (junk) {
+      summary += ', ' + junk + ' hold something in the link column that is not a Fygaro link and will be processed';
+    }
     if (proposed.link) {
       summary += '. Links will go into a new column ' + proposed.link;
     }
@@ -862,10 +909,11 @@
       badge.className = 'badge';
       var word = document.createElement('span');
       // A row Fygaro already had is worth telling apart from one the sheet had
-      // already linked. Both are skipped, but only one of them means the product
-      // exists in Fygaro without a link of ours.
-      word.textContent = (row.status === S.ROW.SKIPPED && row.reason === S.SKIP.EXISTS)
-        ? 'Exists'
+      // already linked, and both from one simply left for another batch. All
+      // three are skipped, but only one of them means the product exists in
+      // Fygaro without a link of ours.
+      word.textContent = (row.status === S.ROW.SKIPPED && row.reason === S.SKIP.EXISTS) ? 'Exists'
+        : (row.status === S.ROW.SKIPPED && row.reason === S.SKIP.HAD_LINK) ? 'Has link'
         : (BADGE[row.status] || row.status);
       badge.appendChild(word);
 

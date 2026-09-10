@@ -43,6 +43,7 @@ globalThis.chrome = {
 new Function(readFileSync(join(root, 'src', 'shared', 'util.js'), 'utf8'))();
 new Function(readFileSync(join(root, 'src', 'shared', 'state.js'), 'utf8'))();
 const S = globalThis.FYG.state;
+const U = globalThis.FYG.util;
 
 test('an empty profile reads the documented defaults', async () => {
   store = {};
@@ -180,4 +181,66 @@ test('every step declares the page it is allowed to act on', () => {
     assert.ok(S.STEP_LABEL[step], `${step} has no label for the interface`);
   }
   assert.equal(S.STEP_ORDER.length, 7);
+});
+
+/*
+ * Recognising a link the sheet already carries lives beside the run state
+ * because S.SKIP.HAD_LINK is what it decides. A row wrongly called linked is
+ * never created, and a row wrongly called unlinked is created a second time and
+ * refused for a duplicate code tens of seconds later, so both directions matter.
+ */
+test('a Fygaro payment link is recognised whatever language prefix it carries', () => {
+  const links = [
+    'https://www.fygaro.com/en/pb/65df9668-0a2e-4c0b-a8f7-0789e47be346/',
+    'https://www.fygaro.com/es/pb/65df9668-0a2e-4c0b-a8f7-0789e47be346/',
+    'https://www.fygaro.com/en/pb/65df9668-0a2e-4c0b-a8f7-0789e47be346',
+    'http://www.fygaro.com/en/pb/65DF9668-0A2E-4C0B-A8F7-0789E47BE346/'
+  ];
+  for (const link of links) {
+    assert.ok(U.isFygaroLink(link), `should be a link: ${link}`);
+    assert.equal(U.fygaroLink(link), link);
+  }
+});
+
+test('text that is not a Fygaro link never counts as one', () => {
+  const notLinks = [
+    '',
+    '   ',
+    null,
+    undefined,
+    'pending',
+    'N/A',
+    '2026-09-10',
+    'B/.625,00',
+    // Both of these are real values this extension writes into the Nota column
+    // one place over. A mapping slip of a single column used to retire every
+    // row that carried one.
+    'Fuera del rango elegido (1020 a 1030).',
+    'Ya existe en Fygaro. Nothing was created and no link was captured.',
+    // Fygaro pages that are not payment buttons.
+    'https://www.fygaro.com/en/app/dashboard/',
+    'https://www.fygaro.com/en/app/products/65df9668-0a2e-4c0b-a8f7-0789e47be346/permalink/product/',
+    // Right shape, wrong length in the uuid slot.
+    'https://www.fygaro.com/en/pb/65df9668/'
+  ];
+  for (const value of notLinks) {
+    assert.ok(!U.isFygaroLink(value), `should not be a link: ${JSON.stringify(value)}`);
+    assert.equal(U.fygaroLink(value), '', `should extract nothing from ${JSON.stringify(value)}`);
+  }
+});
+
+test('a link is pulled out of the text around it, and comes back clean', () => {
+  const link = 'https://www.fygaro.com/en/pb/65df9668-0a2e-4c0b-a8f7-0789e47be346/';
+  assert.equal(U.fygaroLink('Link: ' + link), link);
+  assert.equal(U.fygaroLink(link + ' (sent to the client)'), link);
+  assert.equal(U.fygaroLink('  ' + link + '  '), link);
+  // Extraction is what decides the row is done, so it must agree with the
+  // stricter whole value test on anything the whole value test accepts.
+  assert.ok(U.isFygaroLink(U.fygaroLink('Link: ' + link)));
+});
+
+test('the skip reasons the panel tells apart are all still declared', () => {
+  assert.equal(S.SKIP.HAD_LINK, 'hadLink');
+  assert.equal(S.SKIP.EXISTS, 'exists');
+  assert.equal(S.SKIP.OUT_OF_RANGE, 'range');
 });
