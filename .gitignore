@@ -45,3 +45,5 @@ desktop.ini
 
 # Excel lock files
 ~$*
+
+docs/**.xlsx
