@@ -1,34 +1,89 @@
+<div align="center">
+
+<img src="icons/icon128.png" width="96" height="96" alt="">
+
 # Fygaro Catalog Automation
 
-A Chrome extension that turns a spreadsheet catalog into Fygaro products and payment links, then writes
-every generated link back into the spreadsheet next to the row it came from.
+**A Chrome extension that turns a spreadsheet catalog into Fygaro products and payment links,<br>then writes every generated link back into the spreadsheet next to the row it came from.**
+
+<br>
+
+<img src="https://img.shields.io/badge/Manifest-V3-2457D6?style=flat-square&logo=googlechrome&logoColor=white" alt="Manifest V3">
+<img src="https://img.shields.io/badge/Chrome-116%2B-2457D6?style=flat-square&logo=googlechrome&logoColor=white" alt="Chrome 116 or newer">
+<img src="https://img.shields.io/badge/JavaScript-vanilla-F7DF1E?style=flat-square&logo=javascript&logoColor=black" alt="Vanilla JavaScript">
+<br>
+<img src="https://img.shields.io/badge/runtime%20dependencies-0-17803D?style=flat-square" alt="Zero runtime dependencies">
+<img src="https://img.shields.io/badge/build%20step-none-17803D?style=flat-square" alt="No build step">
+<img src="https://img.shields.io/badge/checks-156-17803D?style=flat-square" alt="156 automated checks">
+<img src="https://img.shields.io/badge/license-proprietary-5B6673?style=flat-square" alt="Proprietary">
+
+</div>
+
+<br>
 
 The catalog behind this project holds 2073 services, most of them with a product photo. Creating each one
-by hand means repeating a seven page workflow 2073 times. This extension performs that loop inside your own signed in browser session, with live
-progress, pause and resume, and a patched spreadsheet at the end.
+by hand means repeating a seven page workflow 2073 times. This extension performs that loop inside your own
+signed in browser session, with live progress, pause and resume, and a patched spreadsheet at the end.
+
+<table>
+<tr>
+<td width="33%" valign="top">
+
+**Nothing to build**
+
+Plain JavaScript, no framework, no bundler. The spreadsheet is read and rewritten using the browser's own
+compression APIs.
+
+</td>
+<td width="33%" valign="top">
+
+**Safe to interrupt**
+
+Progress is written to disk after every step. Pause, close the panel, restart the browser, and the run picks
+up where it stopped.
+
+</td>
+<td width="33%" valign="top">
+
+**Never guesses**
+
+A step that fails stops the run and asks you what to do. No link is written unless it was read off the page.
+
+</td>
+</tr>
+</table>
 
 ---
 
 ## Table of contents
 
-- [What it does](#what-it-does)
-- [Requirements](#requirements)
-- [Installation](#installation)
-- [Using it](#using-it)
-- [Your spreadsheet](#your-spreadsheet)
-- [Settings](#settings)
-- [Products that already exist](#products-that-already-exist)
-- [When something goes wrong](#when-something-goes-wrong)
-- [Exporting](#exporting)
-- [Starting over](#starting-over)
-- [How it works](#how-it-works)
-- [Project layout](#project-layout)
-- [Testing](#testing)
-- [Design](#design)
-- [Privacy and safety](#privacy-and-safety)
-- [Troubleshooting](#troubleshooting)
-- [Developer](#developer)
-- [License](#license)
+<table>
+<tr><td valign="top">
+
+1. [What it does](#what-it-does)
+2. [Requirements](#requirements)
+3. [Installation](#installation)
+4. [Using it](#using-it)
+5. [Your spreadsheet](#your-spreadsheet)
+6. [Settings](#settings)
+7. [Products that already exist](#products-that-already-exist)
+8. [When something goes wrong](#when-something-goes-wrong)
+9. [Exporting](#exporting)
+
+</td><td valign="top">
+
+10. [Starting over](#starting-over)
+11. [How it works](#how-it-works)
+12. [Project layout](#project-layout)
+13. [Testing](#testing)
+14. [Design](#design)
+15. [Privacy and safety](#privacy-and-safety)
+16. [Troubleshooting](#troubleshooting)
+17. [Author](#author)
+18. [License](#license)
+
+</td></tr>
+</table>
 
 ---
 
@@ -37,7 +92,7 @@ progress, pause and resume, and a patched spreadsheet at the end.
 For every row of your catalog the extension performs these seven steps:
 
 | # | Step | Page | What happens |
-|---|------|------|--------------|
+|:---:|------|------|--------------|
 | 1 | Open Products | `/app/dashboard/` | Clicks Products in the sidebar |
 | 2 | Start a new item | `/app/products/` | Clicks Create in the top right, never the centred one |
 | 3 | Fill the product form | `/app/products/add/` | Name, Code and Price from the sheet, Currency USD, Type of Item Service, Show In Website No, then Save |
@@ -88,10 +143,10 @@ plain JavaScript, and the spreadsheet is read and written using the browser's ow
    corner of the Fygaro page. You can carry on using other tabs, but leave the Fygaro tab open.
 5. **Export** when you are ready. You do not have to wait for the whole run.
 
-A run of 2073 rows takes many hours, so the Catalog card lets you set a row range and work through it in
-batches. A run of that size takes tens of hours end to end. You do not have to sit through it: progress is written to disk after
-every step, so you can pause, stop, close the panel, or even restart the browser and pick up where you
-left off. Rows that already have a link are skipped, which is what makes resuming safe.
+A run of 2073 rows takes tens of hours end to end, so the Catalog card lets you set a row range and work
+through it in batches. You do not have to sit through it. Progress is written to disk after every step, so
+you can pause, stop, close the panel, or even restart the browser and pick up where you left off. Rows that
+already have a link are skipped, which is what makes resuming safe.
 
 ---
 
@@ -100,7 +155,7 @@ left off. Rows that already have a link are skipped, which is what makes resumin
 The extension reads these columns and writes back to one of them:
 
 | Column | Header | Used as |
-|--------|--------|---------|
+|:---:|--------|---------|
 | C | `Código` | The product **Code**, and the **Name** of the Fygaro Link |
 | D | `Servicios` | The product **Name** |
 | E | `Precio Total` | The product **Price** |
@@ -112,13 +167,15 @@ Header names are matched ignoring case and accents, and each has accepted altern
 `Code`, `Precio` and `Price` all resolve. If a header is renamed beyond recognition you can map the columns
 by hand in the panel.
 
-**There is no Link column in the current catalog**, so the extension proposes one just past everything the
-sheet uses, shows it in the Link dropdown labelled as new, and writes the `Link` header itself on export.
-That header is one of the spellings it looks for, so the next run finds column I normally and skips the
-rows that are already done. Column H holds the photos and is never written to.
+> [!NOTE]
+> **There is no Link column in the current catalog.** The extension proposes one just past everything the
+> sheet uses, shows it in the Link dropdown labelled as new, and writes the `Link` header itself on export.
+> That header is one of the spellings it looks for, so the next run finds column I normally and skips the
+> rows that are already done. Column H holds the photos and is never written to.
 
-**Photos.** Pictures anchored in column H are uploaded to the product's Gallery. A row without one is
-created normally.
+### Photos
+
+Pictures anchored in column H are uploaded to the product's Gallery. A row without one is created normally.
 
 Fygaro refuses a picture with *"Image size exceeds 2.5MB"*, and it refuses these photos when they are
 uploaded by hand too. It is not measuring the file: 23 of the 35 pictures are between 1.9 and 2.5 MB on
@@ -127,20 +184,29 @@ third.
 
 So every picture is re-encoded once when the catalog loads, aiming at 1 MB, which clears the limit however
 it is actually counted. **Nothing loses resolution.** These are photographs stored as PNG, which is the
-wrong format for them, so simply re-encoding is enough: all 35 keep their exact pixel dimensions, the set
-goes from 64.9 MB to 9.0 MB, and the largest ends up at 373 KB. That also drops what a full run uploads
-from roughly 2 GB to under 300 MB. It takes about ten seconds, once, as the file loads.
+wrong format for them, so simply re-encoding is enough.
+
+| Before | After |
+|--------|-------|
+| 64.9 MB across 35 images | 9.0 MB, largest at 373 KB |
+| Roughly 2 GB uploaded per full run | Under 300 MB |
+
+All 35 keep their exact pixel dimensions. The whole pass takes about ten seconds, once, as the file loads.
 
 Quality is spent before pixels are, so a picture is only ever scaled down if re-encoding alone cannot get
 it under. The log names every picture that was changed. If Fygaro still refuses one, the run stops on that
-row rather than creating a product without its photo. Of the 2073 rows, 1030 carry a picture and 1043 do not, and although the whole pipeline
-handles several per row, no row in this catalog has more than one. Only 35 distinct images are shared
-across those 1030 rows, so each is held once rather than once per row.
+row rather than creating a product without its photo.
 
-**Prices.** The catalog mixes two number conventions in the same column and both are handled:
+Of the 2073 rows, 1030 carry a picture and 1043 do not, and although the whole pipeline handles several per
+row, no row in this catalog has more than one. Only 35 distinct images are shared across those 1030 rows,
+so each is held once rather than once per row.
+
+### Prices
+
+The catalog mixes two number conventions in the same column and both are handled:
 
 | In the sheet | Read as | Why |
-|--------------|---------|-----|
+|--------------|:---:|-----|
 | `B/.625,00` | 625.00 | The comma is the decimal separator |
 | `B/.1.125,00` | 1125.00 | Dot groups thousands, comma is the decimal |
 | `B/.100.00` | 100.00 | The dot is the decimal separator |
@@ -153,7 +219,7 @@ Rows missing a name, missing a code, carrying a price that cannot be read, or pr
 before the run starts and marked Failed, rather than breaking the run halfway through. Their reason is
 written into the `Nota` column on export, so it is in the spreadsheet and not only in the panel.
 
-Rows outside the chosen row range are set aside as Skipped, not Failed. Nothing is wrong with them; they
+Rows outside the chosen row range are set aside as Skipped, not Failed. Nothing is wrong with them. They
 are simply not part of this batch.
 
 ---
@@ -161,7 +227,7 @@ are simply not part of this batch.
 ## Settings
 
 | Setting | Default | What it does |
-|---------|---------|--------------|
+|---------|:---:|--------------|
 | Min delay | 1200 ms | Shortest pause before a click or a keystroke |
 | Max delay | 3000 ms | Longest pause. Each action picks a random time between the two |
 | Step timeout | 20000 ms | How long to wait for a page before treating the step as failed |
@@ -169,12 +235,14 @@ are simply not part of this batch.
 | Page zoom | 67 % | Zooms the Fygaro page out before the run starts, and puts it back afterwards |
 | Dry run | off | Fills the first product form and stops without saving. Nothing is created |
 
-**About the page zoom.** The side panel takes width away from the page. That can push Fygaro past a
-responsive breakpoint and lay the forms out differently, which changes which copy of a duplicated control
-is on screen. Zooming out gives that width back, so the page stays on the layout the steps were written
-for. This is real browser zoom, the same thing Ctrl and minus does, because only real zoom changes the
-layout viewport that the breakpoints respond to. Whatever zoom the page had before the run is remembered
-and restored when the run stops or finishes. Set it to 100 to leave the page alone.
+### About the page zoom
+
+The side panel takes width away from the page. That can push Fygaro past a responsive breakpoint and lay
+the forms out differently, which changes which copy of a duplicated control is on screen. Zooming out gives
+that width back, so the page stays on the layout the steps were written for. This is real browser zoom, the
+same thing Ctrl and minus does, because only real zoom changes the layout viewport that the breakpoints
+respond to. Whatever zoom the page had before the run is remembered and restored when the run stops or
+finishes. Set it to 100 to leave the page alone.
 
 It is applied when you press Start, before the run navigates anywhere, and re-applied at the start of every
 row so it cannot drift. The Activity log records it either way, including the reason if it could not be
@@ -216,8 +284,9 @@ written on the first export if the sheet does not already have them. Column `H` 
 touched, and the table definition is left exactly as it is, so Excel opens the result without offering to
 repair it.
 
-**Choose the destination before you start.** The spreadsheet is then written for you as the run goes
-along, so a run that stops early keeps everything it had already captured.
+> [!IMPORTANT]
+> **Choose the destination before you start.** The spreadsheet is then written for you as the run goes
+> along, so a run that stops early keeps everything it had already captured.
 
 | Option | What happens |
 |--------|--------------|
@@ -241,17 +310,18 @@ Start, never in the middle of a save. Asking later cannot work: rebuilding this 
 seconds, which is longer than Chrome keeps a click alive, and the request is refused with *"Permission to
 write to the file was not granted"* on a file you had only just chosen.
 
-**Updating the original** needs that access to the catalog file itself, which only the file
-picker can do. Use the **Choose your catalog** button rather than dragging the file in, and the option
-becomes available. Dragging still works, and Chrome hands over a handle for drops too where it can. If the
-option stays greyed out, the text under it says why.
+**Updating the original** needs that access to the catalog file itself, which only the file picker can do.
+Use the **Choose your catalog** button rather than dragging the file in, and the option becomes available.
+Dragging still works, and Chrome hands over a handle for drops too where it can. If the option stays greyed
+out, the text under it says why.
 
-**Close the file in Excel first.** Windows will not let anything replace a file Excel is holding open, and
-the panel will tell you so rather than failing quietly. The write is buffered and only committed at the
-end, so an interrupted save cannot leave a half written spreadsheet behind.
+> [!WARNING]
+> **Close the file in Excel first.** Windows will not let anything replace a file Excel is holding open, and
+> the panel will tell you so rather than failing quietly. The write is buffered and only committed at the
+> end, so an interrupted save cannot leave a half written spreadsheet behind.
 
 Either way, everything else in the workbook survives: all other sheets, formatting, formulas, data
-validations, drawings and the hyperlink that was already there. Only the cells in column H that gained a
+validations, drawings and the hyperlink that was already there. Only the cells in column `I` that gained a
 link differ.
 
 The workbook is cached inside the extension, so exporting still works after you close the panel or restart
@@ -345,8 +415,12 @@ src/content/
 src/sidepanel/                       The interface: html, css and js
 tests/                               See below
 tools/                               Test runner, syntax checks, fixture generator
-docs/                                The catalog and the implementation plan
+docs/                                The implementation plan
 ```
+
+> [!NOTE]
+> The catalog workbook is not in this repository. `.gitignore` excludes `docs/**.xlsx`, so the client's
+> `.xlsx` stays on the machine that owns it and never reaches the remote. Keep your own copy in `docs/`.
 
 ---
 
@@ -361,13 +435,21 @@ npm run lint       # syntax, house rules, and manifest references
 `npm test` installs nothing. There are no dependencies to fetch.
 
 | Suite | Checks | Covers |
-|-------|--------|--------|
+|-------|:---:|--------|
 | `tests/price.test.mjs` | 9 | Every one of the 2073 real prices, cross checked against a separate reference implementation |
 | `tests/state.test.mjs` | 11 | Run state, routes, and that a run saved by an older version gains every setting added since |
-| `tests/xlsx.test.mjs` | 14 | ZIP round trips, style preservation, XML escaping, writing a column the sheet has no cells for, and that an unedited rewrite reproduces all 66 parts byte for byte |
+| `tests/xlsx.test.mjs` | 14 | ZIP round trips, style preservation, XML escaping, writing a column the sheet has no cells for, and that an unedited rewrite reproduces every part byte for byte |
 | `tests/selectors.test.html` | 61 | Every locator, run against the nine captured page snapshots, plus the steps waiting for controls that render late |
 | `tests/xlsx.test.html` | 26 | Workbook reading, sheet and column detection, the drawing that anchors the photos, patch and re read |
 | `tests/integration.test.html` | 35 | The real side panel driving the real worker through a full run |
+
+> [!CAUTION]
+> **`tests/xlsx.test.mjs` reads the real catalog** from `docs/Catálogo de Productos y Servicios Fygaro.xlsx`,
+> which is not in the repository. Without that file the suite cannot run at all, and two of its checks
+> currently fail against the copy that is on disk: the workbook has 61 ZIP parts where the test expects 66,
+> and cell `H2` carries style `s="4"` where the test expects `s="9"`. The other 32 node checks and all 122
+> browser checks pass. Either refresh those two expectations or point the suite at
+> `tests/fixtures/catalog-sample.xlsx`, which is committed.
 
 The integration suite is the interesting one. It stubs the Chrome APIs, loads the actual worker and the
 actual panel, then plays a run through: 699 rows loaded, all seven steps walked for several rows, a failure
@@ -377,9 +459,8 @@ retried after a failure, a blank settings field keeping its default rather than 
 a row range that sets the rest of the sheet aside, a picture served to the page in parts and rebuilt with a
 matching checksum, thirty rows sharing one picture costing a single fetch, a duplicate code skipped without
 a retry or a notification, an in place save checked cell by cell against a stand in file handle, a refused
-write permission that
-changes nothing, and a Clear everything that empties storage and puts the panel back to its first run
-state.
+write permission that changes nothing, and a Clear everything that empties storage and puts the panel back
+to its first run state.
 
 The locator suite deliberately applies Fygaro's own checkbox styling to the snapshots, hiding the real
 inputs behind painted replacements. Without that the snapshots render as plain visible checkboxes and a
@@ -421,7 +502,7 @@ appearance can be retuned from one place.
 
 - Your spreadsheet is read **in the browser** and is never uploaded anywhere.
 - The extension talks to no server of its own. Its only host permission is `https://www.fygaro.com/*`.
-- Your original file on disk is never modified. Exports are separate downloads.
+- Your original file on disk is never modified unless you pick **Update the original file** yourself.
 - Nothing happens until you press Start. Dry run lets you prove the whole flow without creating a record.
 - Your Fygaro credentials are never seen or handled. The extension uses the session you already opened.
 
@@ -441,8 +522,7 @@ is under `https://www.fygaro.com/en/app/` or `/es/app/`. Use Open Fygaro in the 
 **"Download updated .xlsx" is greyed out.** The cached workbook was lost. Load the same file again, or use
 Download CSV, which needs no file.
 
-**Excel will not save over the original.** Close the workbook in Excel first. The extension never writes to
-your original file, so you are always replacing it yourself.
+**Excel will not save over the original.** Close the workbook in Excel first.
 
 **A run seems stuck.** Raise Step timeout in Settings if Fygaro is responding slowly, then Retry.
 
@@ -456,29 +536,48 @@ than guessing one.
 was closed mid run it can be left applied. Reset it with Ctrl and 0 on the Fygaro tab, or set Page zoom to
 100 and start and stop a run.
 
-**"The Advanced Options panel did not open."** The error now lists every checkbox actually on the form,
-so compare that against `require_phone`, `require_legal_id` and `require_billing_address`. If the names
-have changed, update `REQUIRED` in `src/content/steps.js`.
+**"The Advanced Options panel did not open."** The error lists every checkbox actually on the form, so
+compare that against `require_phone`, `require_legal_id` and `require_billing_address`. If the names have
+changed, update `REQUIRED` in `src/content/steps.js`.
 
 **After a Fygaro redesign.** Run `npm run test:browser`. The locator suite reports exactly which lookup
 stopped matching.
 
 ---
 
-## Developer
+## Author
 
-**Muhammad Abdullah Awais**
-Full Stack Developer
+<div align="center">
 
-- Website: <https://www.abdullahawais.com>
-- Email: <contact@abdullahawais.com>
-- LinkedIn: <https://www.linkedin.com/in/m-abdullah-awais-programmer>
-- GitHub: <https://github.com/m-abdullah-awais>
-- YouTube: <https://www.youtube.com/@m_abdullah_awais>
-- Instagram: <https://www.instagram.com/m_abdullah_awais>
+<br>
+
+### Muhammad Abdullah Awais
+
+**Full Stack Developer**
+
+<br>
+
+<a href="https://www.abdullahawais.com"><img src="https://img.shields.io/badge/Website-abdullahawais.com-2457D6?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Website"></a>
+<a href="mailto:contact@abdullahawais.com"><img src="https://img.shields.io/badge/Email-contact%40abdullahawais.com-C02626?style=for-the-badge&logo=maildotru&logoColor=white" alt="Email"></a>
+<br>
+<a href="https://www.linkedin.com/in/m-abdullah-awais-programmer"><img src="https://img.shields.io/badge/LinkedIn-Connect-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white" alt="LinkedIn"></a>
+<a href="https://github.com/m-abdullah-awais"><img src="https://img.shields.io/badge/GitHub-Follow-181717?style=for-the-badge&logo=github&logoColor=white" alt="GitHub"></a>
+<a href="https://www.youtube.com/@m_abdullah_awais"><img src="https://img.shields.io/badge/YouTube-Subscribe-FF0000?style=for-the-badge&logo=youtube&logoColor=white" alt="YouTube"></a>
+<a href="https://www.instagram.com/m_abdullah_awais"><img src="https://img.shields.io/badge/Instagram-Follow-E4405F?style=for-the-badge&logo=instagram&logoColor=white" alt="Instagram"></a>
+
+<br>
+
+</div>
 
 ---
 
 ## License
 
 Proprietary. All rights reserved.
+
+This is an independent integration built for a client. It is not affiliated with, endorsed by, or
+sponsored by Fygaro, and the Fygaro name and marks belong to their owner.
+
+<div align="center">
+<sub>Built for Ana Elisa Villalaz.</sub>
+</div>
