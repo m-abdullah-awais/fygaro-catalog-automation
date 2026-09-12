@@ -25,13 +25,22 @@
     productAdd: /^\/(?:en|es)\/app\/products\/add\/?$/,
     productDetail: /^\/(?:en|es)\/app\/products\/[0-9a-f-]{36}\/permalink\/product\/?$/i,
     linkAdd: /^\/(?:en|es)\/app\/payment-buttons\/payments\/payment-buttons\/add\/?$/,
-    dashboard: /^\/(?:en|es)\/app\/dashboard\/?$/
+    dashboard: /^\/(?:en|es)\/app\/dashboard\/?$/,
+    /*
+     * A row on the payment links list. The section link in the sidebar is
+     * /payment-buttons/payments/payment-buttons/, which has one segment where a
+     * row has two, so it cannot be mistaken for a row.
+     */
+    linkRow: /^\/(?:en|es)\/app\/payment-buttons\/payments\/[^\/]+\/payment-buttons\/?$/
   };
 
   // Shared with the sheet reader in the side panel. Capturing a link and
   // recognising one already in the spreadsheet have to agree, or a row the
   // panel calls unlinked gets created in Fygaro a second time.
   var LINK_PATTERN = U.LINK_PATTERN;
+
+  /* What the button at the foot of a paginated list says, folded for matching. */
+  var MORE_RESULTS_TEXT = ['more results', 'mas resultados', 'ver mas', 'load more', 'show more'];
 
   /* Legends the product form uses over its picture gallery, folded for matching. */
   var GALLERY_LEGENDS = ['gallery', 'galeria', 'imagenes', 'images', 'fotos'];
@@ -168,6 +177,41 @@
     // D.control, not D.first: Fygaro hides the real input and paints a div in
     // its place, so requiring visibility finds nothing on the live site.
     return D.control('input[type="checkbox"][name="' + name + '"]', scope);
+  };
+
+  /**
+   * The button that appends the next page to a list, or null when every row is
+   * already on screen.
+   *
+   * Both the products list and the payment links list use the same control, and
+   * its classes are content hashed, so it is found by what it says.
+   */
+  locate.moreResultsButton = function (scope) {
+    return D.firstByText('button', MORE_RESULTS_TEXT, { mode: 'includes', scope: scope });
+  };
+
+  /**
+   * How many rows the list is currently showing.
+   *
+   * Counted rather than collected, and without a visibility test, because this
+   * runs after every click on a list that grows into the thousands and only the
+   * number is wanted. The two lists are counted by the shape of the link each
+   * row wraps, which is the one thing that distinguishes a row from the
+   * navigation around it.
+   */
+  locate.listRowCount = function (scope) {
+    var anchors = D.all('li a[href]', scope);
+    var seen = 0;
+    for (var i = 0; i < anchors.length; i++) {
+      var path;
+      try {
+        path = new URL(anchors[i].getAttribute('href'), location.origin).pathname;
+      } catch (e) {
+        continue;
+      }
+      if (PATH.productDetail.test(path) || PATH.linkRow.test(path)) seen++;
+    }
+    return seen;
   };
 
   locate.saveButton = function (scope) {

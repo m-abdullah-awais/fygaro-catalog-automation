@@ -74,6 +74,7 @@
   <script src="../src/content/assets.js"></script>
   <script src="../src/content/dom.js"></script>
   <script src="../src/content/steps.js"></script>
+  <script src="../src/content/loadall.js"></script>
   <script>
   (function () {
     'use strict';
@@ -706,6 +707,49 @@
       return 'accents folded, nbsp normalised';
     });
 
+    /* ----------------------------------------------- paginated list loading */
+
+    check('finds the More Results button on both paginated lists', function () {
+      ['products-more-button', 'links-more-button'].forEach(function (name) {
+        var scope = mount(name);
+        var button = locate.moreResultsButton(scope);
+        assert(button, 'not found on ' + name);
+        assert(U.textOf(button) === 'More Results', 'wrong text on ' + name + ': ' + U.textOf(button));
+      });
+      return 'the same control serves products and links';
+    });
+
+    check('a list with every row already loaded has no More Results button', function () {
+      var scope = mount('products');
+      assert(locate.moreResultsButton(scope) === null,
+        'a button was found on a list that has no more pages');
+      return 'nothing to press';
+    });
+
+    check('counts the rows on the products list', function () {
+      var scope = mount('products-more-button');
+      var n = locate.listRowCount(scope);
+      assert(n === 18, 'counted ' + n + ', expected 18');
+      return '18 products';
+    });
+
+    check('counts the rows on the payment links list', function () {
+      var scope = mount('links-more-button');
+      var n = locate.listRowCount(scope);
+      assert(n === 18, 'counted ' + n + ', expected 18');
+      return '18 links';
+    });
+
+    check('the sidebar section link is not counted as a list row', function () {
+      // A links row is /payments/<id>/payment-buttons/ and the sidebar entry is
+      // /payments/payment-buttons/, one segment short of a row.
+      var scope = mount('links-more-button');
+      var nav = D.all('a[href$="/payments/payment-buttons/"]', scope);
+      assert(nav.length > 0, 'the sidebar entry should be present in this snapshot');
+      assert(locate.listRowCount(scope) === 18, 'the sidebar entry was counted as a row');
+      return 'sidebar entry rejected';
+    });
+
     /* ------------------------------------------------------------- rendering */
 
     stage.innerHTML = '';
@@ -835,6 +879,93 @@
             assert(stageClicks[0] !== stale, 'it clicked the detached node');
             return 'clicked the live control, not the one it first found';
           });
+      });
+    })
+    .then(function () {
+      return checkLater('load all keeps pressing until the list runs out', function () {
+        /*
+         * A fake list that behaves like Fygaro's: the button appends a page of
+         * rows a moment after it is pressed, and removes itself once the last
+         * page has been served.
+         */
+        stage.innerHTML = '<ul id="rows"></ul><div id="foot"></div>';
+        var rows = document.getElementById('rows');
+        var foot = document.getElementById('foot');
+        var pagesLeft = 4;
+        var pressed = 0;
+
+        function addPage() {
+          for (var i = 0; i < 5; i++) {
+            var li = document.createElement('li');
+            var a = document.createElement('a');
+            a.href = '/en/app/products/c8faacb1-fafc-4672-a50d-ee8edc32' +
+              String(1000 + rows.children.length).slice(-4) + '/permalink/product/';
+            li.appendChild(a);
+            rows.appendChild(li);
+          }
+        }
+
+        function addButton() {
+          var b = document.createElement('button');
+          b.type = 'button';
+          b.textContent = 'More Results';
+          b.addEventListener('click', function () {
+            pressed++;
+            pagesLeft--;
+            // The page arrives a tick later, as a fetch would.
+            setTimeout(function () {
+              addPage();
+              if (pagesLeft <= 0) foot.innerHTML = '';
+            }, 60);
+          });
+          foot.appendChild(b);
+        }
+
+        addPage();
+        addButton();
+
+        return FYG.loadall.run({ minDelayMs: 0, maxDelayMs: 0 }).then(function (result) {
+          assert(result.ok, 'it reported failure: ' + result.stopped);
+          assert(pressed === 4, 'the button was pressed ' + pressed + ' times, expected 4');
+          assert(result.clicks === 4, 'it reported ' + result.clicks + ' clicks');
+          assert(result.rows === 25, 'it reported ' + result.rows + ' rows, expected 25');
+          assert(result.added === 20, 'it reported ' + result.added + ' added, expected 20');
+          assert(/ran out of pages/.test(result.stopped), 'unexpected reason: ' + result.stopped);
+          return '4 pages loaded, 25 rows, stopped on its own';
+        });
+      });
+    })
+    .then(function () {
+      return checkLater('load all stops when a press adds nothing', function () {
+        // A button that stays but never delivers must not spin for ever.
+        stage.innerHTML = '<ul id="rows"><li><a href="/en/app/products/' +
+          'c8faacb1-fafc-4672-a50d-ee8edc325bd0/permalink/product/"></a></li></ul>' +
+          '<div><button type="button">More Results</button></div>';
+
+        var realTimeout = FYG.loadall.PAGE_TIMEOUT_MS;
+        FYG.loadall.PAGE_TIMEOUT_MS = 400;
+
+        return FYG.loadall.run({ minDelayMs: 0, maxDelayMs: 0 }).then(function (result) {
+          FYG.loadall.PAGE_TIMEOUT_MS = realTimeout;
+          assert(result.clicks === 1, 'it pressed ' + result.clicks + ' times, expected to give up after 1');
+          assert(result.rows === 1, 'it reported ' + result.rows + ' rows');
+          assert(/no more rows arrived/.test(result.stopped), 'unexpected reason: ' + result.stopped);
+          return 'gave up after one fruitless press';
+        }, function (err) {
+          FYG.loadall.PAGE_TIMEOUT_MS = realTimeout;
+          throw err;
+        });
+      });
+    })
+    .then(function () {
+      return checkLater('load all says so when there is nothing to load', function () {
+        stage.innerHTML = '';
+        return FYG.loadall.run({ minDelayMs: 0, maxDelayMs: 0 }).then(function (result) {
+          assert(result.ok, 'an empty page is not a failure');
+          assert(result.clicks === 0, 'it pressed something that was not there');
+          assert(/no list to load/.test(result.stopped), 'unexpected reason: ' + result.stopped);
+          return result.stopped;
+        });
       });
     })
     .then(function () { stage.innerHTML = ''; })

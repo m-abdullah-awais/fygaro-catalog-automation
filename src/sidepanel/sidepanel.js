@@ -1084,6 +1084,51 @@
 
   /** Writes the produced workbook straight back into the file on disk. */
 
+  /**
+   * Presses More Results on whichever Fygaro list is open, until it runs out.
+   *
+   * The tab is messaged directly rather than through the worker. Every other
+   * message the worker handles is queued behind one lock and rewrites the run,
+   * and this can take minutes on a list of thousands, which would stall the run
+   * loop for no reason: nothing about loading a list touches the run.
+   */
+  function loadAllRows() {
+    var button = $('btnLoadAll');
+    if (button.disabled) return Promise.resolve();
+
+    var wasSaying = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Loading...';
+    $('loadAllHint').textContent = 'Pressing More Results on the Fygaro tab. Leave it open.';
+
+    return chrome.tabs.query({ url: [S.ORIGIN + '/en/app/*', S.ORIGIN + '/es/app/*'] })
+      .then(function (tabs) {
+        if (!tabs || !tabs.length) {
+          throw new Error('No Fygaro tab is open. Press Open Fygaro first, then go to the products ' +
+            'or payment links list.');
+        }
+        return chrome.tabs.sendMessage(tabs[0].id, {
+          type: S.MSG.LOAD_ALL,
+          minDelayMs: view.run.settings.minDelayMs,
+          maxDelayMs: view.run.settings.maxDelayMs
+        });
+      })
+      .then(function (result) {
+        if (!result) throw new Error('The Fygaro tab did not answer. Reload it and try again.');
+        $('loadAllHint').textContent = 'Loaded ' + result.rows + ' ' + result.kind + ' after ' +
+          result.clicks + ' click' + (result.clicks === 1 ? '' : 's') + ', ' + result.stopped + '.';
+      })
+      .catch(function (err) {
+        $('loadAllHint').textContent = 'Could not load the list: ' +
+          (err && err.message ? err.message : String(err));
+      })
+      .then(function () {
+        button.disabled = false;
+        button.textContent = wasSaying;
+        return refresh();
+      });
+  }
+
   /** What the sheet needs written into it, or null when there is nothing yet. */
   function buildBatches() {
     var file = view.run.file || {};
@@ -1459,6 +1504,8 @@
     $('btnRetry').addEventListener('click', function () { send(S.MSG.RETRY).then(refresh); });
     $('btnSkip').addEventListener('click', function () { send(S.MSG.SKIP_ROW).then(refresh); });
     $('btnOpenFygaro').addEventListener('click', function () { send(S.MSG.OPEN_FYGARO); });
+
+    $('btnLoadAll').addEventListener('click', loadAllRows);
 
     $('btnResetAll').addEventListener('click', function () {
       var links = view.rows.filter(function (r) { return r.link; }).length;

@@ -100,7 +100,18 @@
     STEP_FAILED: 'STEP_FAILED',
     CONTENT_LOG: 'CONTENT_LOG',
     OPEN_FYGARO: 'OPEN_FYGARO',
-    REQUEST_IMAGE: 'REQUEST_IMAGE'
+    REQUEST_IMAGE: 'REQUEST_IMAGE',
+    LOAD_ALL: 'LOAD_ALL'
+  };
+
+  /*
+   * The two paginated lists, and what each one holds. Both pages show the same
+   * "More Results" button, so the only thing the page tells us is which of the
+   * two we are looking at.
+   */
+  S.LIST_KIND = {
+    productList: 'products',
+    linkList: 'links'
   };
 
   /*
@@ -171,6 +182,7 @@
     productList: /^\/(?:en|es)\/app\/products\/?$/,
     productAdd: /^\/(?:en|es)\/app\/products\/add\/?$/,
     productDetail: /^\/(?:en|es)\/app\/products\/[0-9a-f-]{36}\/permalink\/product\/?$/i,
+    linkList: /^\/(?:en|es)\/app\/payment-buttons\/payments\/payment-buttons\/?$/,
     linkAdd: /^\/(?:en|es)\/app\/payment-buttons\/payments\/payment-buttons\/add\/?$/,
     linkDone: /^\/(?:en|es)\/app\/payment-buttons\/payments\/[0-9a-f-]{36}\/payment-buttons\/permalink\/?$/i
   };

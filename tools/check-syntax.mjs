@@ -33,10 +33,15 @@ for (const file of files) {
 
   const text = readFileSync(file, 'utf8');
 
-  // House rule: no em dash anywhere in the project. The character is built from
-  // its code point so this file does not trip its own check.
+  // House rule: no em dash anywhere we write. The character is built from its
+  // code point so this file does not trip its own check.
+  //
+  // The captured page snapshots are exempt. They are Fygaro's own markup copied
+  // verbatim, and its marketing copy contains em dashes, so enforcing our house
+  // style there would mean either failing the lint for ever or editing evidence
+  // that only has value while it matches the real page.
   const emDash = String.fromCharCode(0x2014);
-  if (text.includes(emDash)) {
+  if (rel !== 'tests/fixtures/snapshots.js' && text.includes(emDash)) {
     const line = text.slice(0, text.indexOf(emDash)).split('\n').length;
     problems.push(`${rel}:${line}  contains an em dash`);
   }

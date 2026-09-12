@@ -250,6 +250,20 @@ applied.
 
 ---
 
+## Seeing a whole list in Fygaro
+
+Fygaro shows its products and its payment links a page at a time, with a **More Results** button at the
+foot. On a catalog of this size that is a hundred presses to see everything.
+
+Open either list in the Fygaro tab and press **Load all rows** in the Run card. It presses More Results
+until the list runs out, pacing itself with the same delays as a run, and reports how many rows it ended
+up with. It only reads and clicks: nothing is created, changed or saved, and the run is not touched.
+
+It stops on its own when the button disappears, when a press brings back no new rows, or after 600
+presses, whichever comes first. Progress appears in the Activity log every ten presses.
+
+---
+
 ## Products that already exist
 
 If Fygaro refuses a Code because it is already in use, the row is skipped and the run carries on. It shows
@@ -439,7 +453,7 @@ npm run lint       # syntax, house rules, and manifest references
 | `tests/price.test.mjs` | 9 | Every one of the 2073 real prices, cross checked against a separate reference implementation |
 | `tests/state.test.mjs` | 11 | Run state, routes, and that a run saved by an older version gains every setting added since |
 | `tests/xlsx.test.mjs` | 14 | ZIP round trips, style preservation, XML escaping, writing a column the sheet has no cells for, and that an unedited rewrite reproduces every part byte for byte |
-| `tests/selectors.test.html` | 61 | Every locator, run against the nine captured page snapshots, plus the steps waiting for controls that render late |
+| `tests/selectors.test.html` | 69 | Every locator, run against the nine captured page snapshots, plus the steps waiting for controls that render late |
 | `tests/xlsx.test.html` | 26 | Workbook reading, sheet and column detection, the drawing that anchors the photos, patch and re read |
 | `tests/integration.test.html` | 35 | The real side panel driving the real worker through a full run |
 

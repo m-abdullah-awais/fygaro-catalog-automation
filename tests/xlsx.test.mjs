@@ -31,11 +31,17 @@ const cellIn = (xml, ref) =>
 
 test('reads every entry of the real workbook', async () => {
   const arch = await zip.read(original);
-  assert.equal(arch.order.length, 66);
+
+  // Deliberately no exact entry count. This file is re-saved by hand between
+  // runs and the part list changes with it, which made the count a number that
+  // had to be edited rather than a fact worth asserting. What matters is that
+  // nothing was dropped on the way in, and that the parts the reader needs are
+  // all there.
+  assert.equal(arch.order.length, arch.files.size, 'every listed entry must have been read');
+  assert.ok(arch.order.length > 20, 'a workbook this size should have far more parts');
   assert.ok(arch.files.has('xl/workbook.xml'));
   assert.ok(arch.files.has('xl/sharedStrings.xml'));
   assert.ok(arch.files.has(SHEET_PART));
-  assert.equal(arch.order.length, arch.files.size);
 });
 
 test('a rewrite with no edits reproduces every part byte for byte', async () => {
@@ -67,14 +73,22 @@ test('patching column H keeps styles, other cells, and every other part', async 
     { row: 3000, value: 'https://www.fygaro.com/en/pb/aaaaaaaa-0000-0000-0000-000000003000/' }
   ];
 
-  assert.equal(cellIn(xml, 'H2'), '<c r="H2" s="9"/>', 'precondition: H2 starts empty and styled');
+  // The style number itself is whatever this save of the file happens to use,
+  // so it is read from the sheet rather than written down here. The property
+  // under test is that the cell keeps the style it arrived with.
+  const styleOf = (ref) => (/ s="([^"]*)"/.exec(cellIn(xml, ref) || '') || [, null])[1];
+
+  assert.match(cellIn(xml, 'H2'), /^<c r="H2" s="\d+"\/>$/, 'precondition: H2 starts empty and styled');
   assert.equal(cellIn(xml, 'H3000'), null, 'precondition: row 3000 does not exist');
 
   const patched = xlsx.patchSheetXml(xml, 'H', updates);
 
-  assert.match(cellIn(patched, 'H2'), /^<c r="H2" s="9" t="inlineStr">/, 'style s="9" must survive');
-  assert.match(cellIn(patched, 'H3'), /^<c r="H3" s="9" t="inlineStr">/, 'style s="9" must survive');
-  assert.match(cellIn(patched, 'H700'), /^<c r="H700" s="9" t="inlineStr">/, 'style s="9" must survive');
+  for (const ref of ['H2', 'H3', 'H700']) {
+    const was = styleOf(ref);
+    assert.ok(was, `precondition: ${ref} should start with a style`);
+    assert.match(cellIn(patched, ref), new RegExp(`^<c r="${ref}" s="${was}" t="inlineStr">`),
+      `${ref} must keep the style it had`);
+  }
   assert.ok(cellIn(patched, 'H3000'), 'a missing row must be created');
   for (const u of updates) {
     assert.ok(patched.includes(u.value), `link for row ${u.row} must be present`);

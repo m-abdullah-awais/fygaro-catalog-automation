@@ -212,6 +212,37 @@
 
   setInterval(tick, HEARTBEAT_MS);
 
+  /*
+   * The one thing the page is asked to do rather than asks about.
+   *
+   * Everything else here is a poll, because the run has to survive the worker
+   * being restarted. Loading a list is a single deliberate press of a button in
+   * the panel, with an answer the panel waits for, so it is pushed straight to
+   * the tab instead.
+   */
+  chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
+    if (!msg || msg.type !== S.MSG.LOAD_ALL) return false;
+
+    report('info', 'Loading every row on this page.');
+    FYG.loadall.run({
+      minDelayMs: msg.minDelayMs,
+      maxDelayMs: msg.maxDelayMs,
+      onProgress: function (at) {
+        // Only every so often: a hundred clicks would otherwise fill the log
+        // and rewrite it in storage a hundred times.
+        if (at.clicks % 10 === 0) {
+          report('info', 'Loaded ' + at.rows + ' ' + at.kind + ' so far.');
+        }
+      }
+    }).then(function (result) {
+      report(result.ok ? 'success' : 'warn',
+        'Loaded ' + result.rows + ' ' + result.kind + ' after ' + result.clicks +
+        ' click' + (result.clicks === 1 ? '' : 's') + ', ' + result.stopped + '.');
+      sendResponse(result);
+    });
+    return true;
+  });
+
   // Reacts the instant the side panel starts, pauses or resumes a run.
   chrome.storage.onChanged.addListener(function (changes, area) {
     if (area === 'local' && changes[S.KEY_RUN]) tick();
