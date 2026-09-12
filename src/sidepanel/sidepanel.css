@@ -431,6 +431,39 @@ input:focus, select:focus { border-color: var(--primary); }
 
 .empty { text-align: center; color: var(--text-muted); font-size: var(--fs-sm); padding: var(--sp-4) 0; }
 
+/* --------------------------------------------------------------- foldable */
+
+/*
+ * A card that collapses. Styled to read as a card heading rather than as the
+ * Activity log's summary, because it sits among the numbered cards and should
+ * look like one of them, just one you can put away.
+ */
+details.fold > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--text-secondary);
+}
+
+details.fold > summary::-webkit-details-marker { display: none; }
+details.fold > summary::before { content: "\25B8"; color: var(--text-muted); letter-spacing: 0; }
+details.fold[open] > summary::before { content: "\25BE"; }
+
+/* Only take the space below the heading once there is something under it. */
+details.fold[open] > summary { margin-bottom: var(--sp-3); }
+
+details.fold > summary:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
 /* -------------------------------------------------------------------- log */
 
 details.log summary {

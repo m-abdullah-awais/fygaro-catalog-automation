@@ -35,13 +35,17 @@
     exist.
   -->
   <section class="card">
-    <h2>Fygaro list</h2>
-    <p class="hint" style="margin-top:0">Fygaro shows its products and its payment links a page at a time.
-      Open either list in the Fygaro tab and this presses More Results until every row is on screen.</p>
-    <div class="row-of-buttons">
-      <button type="button" class="subtle" id="btnLoadAll">Load all rows</button>
-    </div>
-    <p class="hint" id="loadAllHint"></p>
+    <!-- Closed by default. It is occasional, and shut it costs one line. -->
+    <details class="fold" id="fygaroListBox">
+      <summary>Fygaro list</summary>
+      <p class="hint" style="margin-top:0">Fygaro shows its products and its payment links a page at a
+        time. Open either list in the Fygaro tab and this presses More Results until every row is on
+        screen.</p>
+      <div class="row-of-buttons">
+        <button type="button" class="subtle" id="btnLoadAll">Load all rows</button>
+      </div>
+      <p class="hint" id="loadAllHint"></p>
+    </details>
   </section>
 
   <!-- 1. Catalog -->
