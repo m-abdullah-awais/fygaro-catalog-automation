@@ -31,13 +31,22 @@
      * /payment-buttons/payments/payment-buttons/, which has one segment where a
      * row has two, so it cannot be mistaken for a row.
      */
-    linkRow: /^\/(?:en|es)\/app\/payment-buttons\/payments\/[^\/]+\/payment-buttons\/?$/
+    linkRow: /^\/(?:en|es)\/app\/payment-buttons\/payments\/[^\/]+\/payment-buttons\/?$/,
+    /*
+     * A payment link's own page. Search results point straight here, while rows
+     * in the list point at linkRow above, so the trailing /permalink/ is what
+     * tells a search hit apart from an ordinary row on the same page.
+     */
+    linkPermalink: /^\/(?:en|es)\/app\/payment-buttons\/payments\/[^\/]+\/payment-buttons\/permalink\/?$/i
   };
 
   // Shared with the sheet reader in the side panel. Capturing a link and
   // recognising one already in the spreadsheet have to agree, or a row the
   // panel calls unlinked gets created in Fygaro a second time.
   var LINK_PATTERN = U.LINK_PATTERN;
+
+  /* What the search panel says when it matched nothing, folded for matching. */
+  var NO_RESULTS_TEXT = ['no results', 'sin resultados', 'no hay resultados'];
 
   /* What the button at the foot of a paginated list says, folded for matching. */
   var MORE_RESULTS_TEXT = ['more results', 'mas resultados', 'ver mas', 'load more', 'show more'];
@@ -212,6 +221,39 @@
       if (PATH.productDetail.test(path) || PATH.linkRow.test(path)) seen++;
     }
     return seen;
+  };
+
+  /**
+   * The search box in the app header.
+   *
+   * It is part of the shell rather than of any one page, so it is there on the
+   * products list and the links list alike, and typing into it opens a results
+   * panel over whatever is underneath.
+   */
+  locate.searchBox = function (scope) {
+    return D.control('input[type="search"][name="search"]', scope);
+  };
+
+  /** True when the search panel is showing its empty state. */
+  locate.searchFoundNothing = function (scope) {
+    return !!D.byText('h3', NO_RESULTS_TEXT, { mode: 'includes', scope: scope })[0];
+  };
+
+  /**
+   * A search hit for one payment link, matched on its code.
+   *
+   * The code has to match exactly. Fygaro's search is a substring match, so
+   * looking for CT-ING-PRE-EQ-01 also turns up CT-ING-PRE-EQ-010, and treating
+   * that as this row's link would leave the row silently wrong.
+   */
+  locate.linkSearchResult = function (scope, code) {
+    var wanted = U.foldText(code || '');
+    if (!wanted) return null;
+    var anchors = linksMatching(PATH.linkPermalink, scope);
+    for (var i = 0; i < anchors.length; i++) {
+      if (U.foldText(listItemName(anchors[i])) === wanted) return anchors[i];
+    }
+    return null;
   };
 
   locate.saveButton = function (scope) {
@@ -641,20 +683,100 @@
   };
 
   /**
+   * Types into the app's search box, which opens a results panel over the page.
+   *
+   * The value is cleared again by the caller once it has read what it needed.
+   * The panel covers whatever is underneath, so leaving a search in place would
+   * hide the very list the next step is about to work on.
+   */
+  function searchFor(term, settings) {
+    var box = locate.searchBox();
+    if (!box) fail('The search box was not found in the Fygaro header.');
+    D.reveal(box);
+    if (!D.fillText(box, term)) fail('The search box did not keep "' + term + '".');
+    return pause(settings).then(function () { return box; });
+  }
+
+  function clearSearch() {
+    var box = locate.searchBox();
+    if (box) D.fillText(box, '');
+  }
+
+  /**
+   * Runs only when Fygaro refused the code as already taken.
+   *
+   * The product exists, so the question is whether it already has a payment
+   * link. Searching answers that directly, and matters because the products
+   * list is paginated: an item created months ago can be two thousand rows down
+   * where nothing on screen would ever show it.
+   */
+  STEPS[S.STEP.CHECK_LINK] = function (job) {
+    var row = job.row;
+    var settings = job.settings;
+
+    return searchFor(row.code, settings)
+      .then(function () {
+        return D.waitFor(function () {
+          if (locate.linkSearchResult(null, row.code)) return 'found';
+          if (locate.searchFoundNothing()) return 'none';
+          return null;
+        }, settings.stepTimeoutMs, 'the search for ' + row.code)
+          .catch(function () {
+            fail('Searching the payment links for ' + row.code + ' returned neither a result nor an ' +
+              'empty answer, so whether it already has a link is unknown.');
+          });
+      })
+      .then(function (answer) {
+        // Always tidied up: the panel sits over the page, and the next step is
+        // about to work on the list underneath it.
+        clearSearch();
+        return { linkExists: answer === 'found' };
+      }, function (err) {
+        clearSearch();
+        throw err;
+      });
+  };
+
+  /**
+   * Brings the product into view, searching for it when the list does not have
+   * it.
+   *
+   * A product this run just created is at the top of a newest first list, which
+   * is the ordinary case and costs nothing. One that already existed can be
+   * anywhere in thousands of paginated rows, and only the search will reach it.
+   */
+  function ensureProductVisible(find, row, settings) {
+    if (find()) return Promise.resolve();
+
+    return D.waitFor(find, Math.min(settings.stepTimeoutMs, 4000), 'the product in the list')
+      .catch(function () {
+        if (!locate.searchBox()) return null;
+        return searchFor(row.code, settings).then(function () {
+          return D.waitFor(find, settings.stepTimeoutMs, 'the product in the search results')
+            .catch(function () { return null; });
+        });
+      })
+      .then(function () { return null; });
+  }
+
+  /**
    * 4. Open the product that was just created.
    * Matched on name plus code rather than on being newest, so a catalog with
    * repeated names cannot open the wrong record.
    */
   STEPS[S.STEP.OPEN_PRODUCT] = function (job) {
     var row = job.row;
+    var find = function () { return locate.productListItem(null, row.name, row.code); };
 
-    return settleThenClick(
-      function () { return locate.productListItem(null, row.name, row.code); },
-      job.settings,
-      'the product "' + U.truncate(row.name, 60) + '" in the list',
-      'The product "' + U.truncate(row.name, 80) + '" (code ' + row.code +
-        ') did not appear in the products list, so it may not have saved.'
-    ).then(function (anchor) {
+    return ensureProductVisible(find, row, job.settings).then(function () {
+      return settleThenClick(
+        find,
+        job.settings,
+        'the product "' + U.truncate(row.name, 60) + '" in the list',
+        'The product "' + U.truncate(row.name, 80) + '" (code ' + row.code +
+          ') was not in the products list and the search did not find it either.'
+      );
+    }).then(function (anchor) {
       // Read from the row actually clicked, not the one found before the pause.
       var uuid = U.extractUuid(anchor.getAttribute('href'));
       return waitForRouteOrExplain('productDetail', job.settings.stepTimeoutMs, 'Opening the product')

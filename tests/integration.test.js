@@ -776,7 +776,7 @@
     })
 
     .then(function () {
-      return check('a code that already exists skips the row instead of stopping the run', function () {
+      return check('an existing product with a link already made is skipped', function () {
         var complaint = 'This code is already in use by another product or version';
         var notificationsBefore = recorded.notifications.length;
 
@@ -795,12 +795,29 @@
                 'the job carries "' + job.row.imageId + '" but the row has "' + before.rows[at].imageId + '"');
               return finishStep(job.step, { duplicate: complaint });
             })
+            // The product exists, but that does not settle the row: it may have
+            // no link, which is the whole point of the run. It goes and looks.
+            .then(readState)
+            .then(function (mid) {
+              assert(mid.run.step === S.STEP.CHECK_LINK,
+                'expected it to go and look for a link, it went to ' + mid.run.step);
+              assert(mid.rows[at].status === S.ROW.ACTIVE, 'the row should still be in hand');
+              assert(recorded.tabUpdates[recorded.tabUpdates.length - 1] === S.LINKS_URL,
+                'the browser was not sent to the payment links list');
+              return askForJob('linkList');
+            })
+            .then(function (job) {
+              assert(job.act === 'run', 'expected the link check, got "' + job.act + '"');
+              return finishStep(S.STEP.CHECK_LINK, { linkExists: true });
+            })
             .then(readState)
             .then(function (after) {
               var row = after.rows[at];
               assert(row.status === S.ROW.SKIPPED, 'the row is "' + row.status + '", expected skipped');
               assert(row.reason === S.SKIP.EXISTS, 'the reason is "' + row.reason + '"');
               assert(/Ya existe en Fygaro/.test(row.error), 'unhelpful reason: ' + row.error);
+              assert(/ya tiene su link/.test(row.error),
+                'the reason should say a link was already there: ' + row.error);
               assert(row.link === '', 'a skipped row must carry no link');
 
               // The run has to keep going, not stop and wait for a person.
@@ -1262,6 +1279,73 @@
     })
 
     .then(function () {
+      return check('an existing product with no link gets one made for it', function () {
+        /*
+         * The other half of the duplicate case, and the one that earns its
+         * keep. The product is already in Fygaro but nobody ever made a payment
+         * link for it, so the row is not finished at all: the run picks up from
+         * opening that product and carries on exactly as it would have done had
+         * it just created it.
+         */
+        var complaint = 'This code is already in use by another product or version';
+        var link = 'https://www.fygaro.com/en/pb/cccccccc-3333-3333-3333-333333333333/';
+
+        // The dry run test before this one leaves the flag set, and a dry run
+        // stops at the product form, which is exactly where this test begins.
+        return chrome.runtime.sendMessage({ type: S.MSG.UPDATE_SETTINGS, settings: { dryRun: false } })
+          .then(function () { return chrome.runtime.sendMessage({ type: S.MSG.START }); })
+          .then(function () { return readState(); })
+          .then(function (before) {
+            var at = before.run.cursor;
+            assert(before.run.status === S.STATUS.RUNNING,
+              'the run is "' + before.run.status + '" after Start');
+            assert(at >= 0, 'the run should have a row in hand');
+
+            return askForJob('dashboard')
+              .then(function (job) { return finishStep(job.step); })
+              .then(function () { return askForJob('productList'); })
+              .then(function (job) { return finishStep(job.step); })
+              .then(function () { return askForJob('productAdd'); })
+              .then(function (job) { return finishStep(job.step, { duplicate: complaint }); })
+              .then(function () { return askForJob('linkList'); })
+              .then(function (job) {
+                assert(job.act === 'run', 'expected the link check, got "' + job.act + '"');
+                return finishStep(S.STEP.CHECK_LINK, { linkExists: false });
+              })
+              .then(readState)
+              .then(function (mid) {
+                assert(mid.run.step === S.STEP.OPEN_PRODUCT,
+                  'expected it to go and open the product, it went to ' + mid.run.step);
+                assert(mid.rows[at].status === S.ROW.ACTIVE, 'the row should still be in hand');
+                assert(recorded.tabUpdates[recorded.tabUpdates.length - 1] === S.PRODUCTS_URL,
+                  'the browser was not sent to the products list');
+
+                // From here it is the ordinary flow, so play it out and check
+                // the row really does end up with its link.
+                return askForJob('productList');
+              })
+              .then(function (job) {
+                return finishStep(job.step, { productUuid: 'cccccccc-0000-0000-0000-000000000003' });
+              })
+              .then(function () { return askForJob('productDetail'); })
+              .then(function (job) { return finishStep(job.step); })
+              .then(function () { return askForJob('linkAdd'); })
+              .then(function (job) { return finishStep(job.step); })
+              .then(function () { return askForJob('linkDone'); })
+              .then(function (job) { return finishStep(job.step, { link: link }); })
+              .then(readState)
+              .then(function (after) {
+                var row = after.rows[at];
+                assert(row.status === S.ROW.DONE, 'the row is "' + row.status + '", expected done');
+                assert(row.link === link, 'the link was not captured: "' + row.link + '"');
+                assert(row.reason !== S.SKIP.EXISTS, 'it was recorded as skipped despite finishing');
+                return 'existing product, no link, link created and captured';
+              });
+          });
+      });
+    })
+
+    .then(function () {
       return check('Clear everything empties storage and resets the whole panel', function () {
         // Leave some interface state behind, so the reset has something to undo.
         $('search').value = 'CT-ING';
@@ -1298,7 +1382,8 @@
             assert($('resetSummary').textContent === 'Nothing is stored yet.',
               'the summary still reads "' + $('resetSummary').textContent + '"');
             assert($('btnStart').disabled, 'Start should be disabled again');
-            assert($('sheetSelect').options.length === 0, 'the sheet list was not cleared');
+            assert($('sheetSelect').options.length === 0, 'the sheet list was not cleared: [' +
+              Array.prototype.map.call($('sheetSelect').options, function (o) { return o.value; }).join(', ') + ']');
             return 'storage empty, panel back to its first run state';
           });
       });

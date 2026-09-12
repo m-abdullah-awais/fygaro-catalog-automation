@@ -85,6 +85,9 @@
    * triggered by the running job cannot snap the picker shut under them. */
   var choosingFile = false;
 
+  /* Set between pressing Clear everything and the storage actually emptying. */
+  var clearing = false;
+
   var $ = function (id) { return document.getElementById(id); };
 
   function send(type, payload) {
@@ -733,6 +736,7 @@
     setHidden($('fileEmpty'), loaded);
     setHidden($('fileLoaded'), !loaded);
     setHidden($('btnChangeFile'), !loaded);
+
     if (!loaded) return;
 
     var file = run.file || {};
@@ -795,7 +799,9 @@
         dot.title = S.STEP_LABEL[step];
         dots.appendChild(dot);
       });
-      $('stepName').textContent = 'Step ' + (at + 1) + ' of 7 · ' + (S.STEP_LABEL[run.step] || run.step);
+      // A branch step is not one of the seven, so numbering it would be a lie.
+      $('stepName').textContent = (at === -1 ? '' : 'Step ' + (at + 1) + ' of 7 · ') +
+        (S.STEP_LABEL[run.step] || run.step);
     }
   }
 
@@ -1043,6 +1049,7 @@
   }
 
   function render() {
+    if (clearing) return;
     renderStatus(view.run);
     renderAttention(view.run);
     renderCatalog(view.run, view.rows);
@@ -1563,6 +1570,21 @@
       sheetData = null;
       headerInfo = null;
       choosingFile = false;
+      /*
+       * The remembered state goes too, not just the controls. Storage is
+       * cleared asynchronously, and any render that lands in the meantime reads
+       * this: with the workbook already gone it would fill the sheet picker
+       * back in from the run it still thought was loaded.
+       */
+      view = { run: S.defaultRun(), rows: [], log: [] };
+
+      /*
+       * Nothing may repaint until the storage clear has actually landed.
+       * Emptying storage is asynchronous, so a read taken in the meantime still
+       * holds the old catalog, and rendering that with the workbook already
+       * gone fills the sheet picker back in from the run it just discarded.
+       */
+      clearing = true;
       filter = 'all';
       searchTerm = '';
       lastSaveMessage = '';
@@ -1592,7 +1614,10 @@
       FYG.idb.clearStore('workbook');
       FYG.idb.clearStore('images');
       imageIndex = null;
-      send(S.MSG.RESET).then(refresh);
+      send(S.MSG.RESET).then(function () {
+        clearing = false;
+        return refresh();
+      });
     });
 
     ['targetCopy', 'targetOriginal', 'targetNewFile'].forEach(function (id) {

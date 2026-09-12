@@ -707,6 +707,63 @@
       return 'accents folded, nbsp normalised';
     });
 
+    /* ------------------------------------------------- searching for a link */
+
+    var SEARCHED_CODE = 'PROG-INT-PSICO-AEV-VIR-MEN-9';
+
+    check('finds the search box in the app header', function () {
+      var scope = mount('links-with-header');
+      var box = locate.searchBox(scope);
+      assert(box, 'the search box was not found');
+      assert(box.getAttribute('type') === 'search', 'wrong field: ' + D.describe(box));
+      return D.describe(box);
+    });
+
+    check('reads an existing link out of the search results', function () {
+      var scope = mount('links-after-search');
+      var hit = locate.linkSearchResult(scope, SEARCHED_CODE);
+      assert(hit, 'the result for ' + SEARCHED_CODE + ' was not found');
+      assert(/\/permalink\/$/.test(hit.getAttribute('href')),
+        'a result should point at the link itself: ' + hit.getAttribute('href'));
+      assert(locate.searchFoundNothing(scope) === false, 'it also reported finding nothing');
+      return hit.getAttribute('href');
+    });
+
+    check('an empty search is reported as nothing found, not as a result', function () {
+      var scope = mount('links-with-header');
+      assert(locate.searchFoundNothing(scope) === true, 'the empty state was not recognised');
+      assert(locate.linkSearchResult(scope, SEARCHED_CODE) === null,
+        'it found a result on a page showing No Results');
+      return 'No Results recognised';
+    });
+
+    check('a row in the list underneath is never mistaken for a search result', function () {
+      /*
+       * Both are on the page at once. A list row is /payments/<id>/payment-buttons/
+       * and a result is the same with /permalink/ on the end, and only the
+       * result is the link's own page.
+       */
+      var scope = mount('links-after-search');
+      assert(locate.listRowCount(scope) === 18, 'the list underneath should still hold 18 rows');
+      var rows = D.all('li a[href$="/payment-buttons/"]', scope);
+      assert(rows.length > 0, 'the plain list rows should be present in this snapshot');
+      var hit = locate.linkSearchResult(scope, SEARCHED_CODE);
+      assert(Array.prototype.indexOf.call(rows, hit) === -1, 'it picked a plain list row');
+      return 'result and row told apart';
+    });
+
+    check('a code that merely starts the same is not treated as a match', function () {
+      // Fygaro's search is a substring match, so looking for a short code turns
+      // up longer ones. Accepting one would put another product's link on this
+      // row, which nothing downstream would ever catch.
+      var scope = mount('links-after-search');
+      assert(locate.linkSearchResult(scope, 'PROG-INT-PSICO-AEV-VIR-MEN') === null,
+        'a prefix of the code was accepted as the code');
+      assert(locate.linkSearchResult(scope, 'PROG') === null, 'a fragment was accepted as the code');
+      assert(locate.linkSearchResult(scope, SEARCHED_CODE), 'the exact code should still match');
+      return 'only the exact code counts';
+    });
+
     /* ----------------------------------------------- paginated list loading */
 
     check('finds the More Results button on both paginated lists', function () {
@@ -965,6 +1022,54 @@
           assert(result.clicks === 0, 'it pressed something that was not there');
           assert(/no list to load/.test(result.stopped), 'unexpected reason: ' + result.stopped);
           return result.stopped;
+        });
+      });
+    })
+    .then(function () {
+      return checkLater('the link check reports a link that is already there', function () {
+        var scope = mount('links-after-search');
+        var box = locate.searchBox(scope);
+        assert(box, 'the snapshot should have a search box');
+
+        return FYG.steps[S.STEP.CHECK_LINK]({
+          settings: IMPATIENT,
+          row: { sheetRow: 9, code: 'PROG-INT-PSICO-AEV-VIR-MEN-9' }
+        }).then(function (result) {
+          assert(result.linkExists === true, 'it did not see the link that is on the page');
+          // The panel sits over the list the next step works on, so it has to go.
+          assert(locate.searchBox(scope).value === '', 'the search box was left filled in');
+          return 'found, and the search was cleared after';
+        });
+      });
+    })
+    .then(function () {
+      return checkLater('the link check reports when there is no link yet', function () {
+        var scope = mount('links-with-header');
+        return FYG.steps[S.STEP.CHECK_LINK]({
+          settings: IMPATIENT,
+          row: { sheetRow: 9, code: 'CT-ING-PRE-EQ-01' }
+        }).then(function (result) {
+          assert(result.linkExists === false, 'it claimed a link exists on a No Results page');
+          assert(locate.searchBox(scope).value === '', 'the search box was left filled in');
+          return 'nothing found, so the run will make one';
+        });
+      });
+    })
+    .then(function () {
+      return checkLater('the link check refuses to guess when the search says nothing', function () {
+        // Neither a result nor an empty answer means we do not know, and
+        // guessing either way either skips a row that needed a link or makes a
+        // second link for one that already had one.
+        stage.innerHTML = '<label><input type="search" name="search" value=""></label>';
+        return FYG.steps[S.STEP.CHECK_LINK]({
+          settings: IMPATIENT,
+          row: { sheetRow: 9, code: 'CT-ING-PRE-EQ-01' }
+        }).then(function () {
+          throw new Error('it should not have returned an answer');
+        }, function (err) {
+          assert(/neither a result nor an empty answer/.test(err.message),
+            'unhelpful message: ' + err.message);
+          return 'refused to guess';
         });
       });
     })

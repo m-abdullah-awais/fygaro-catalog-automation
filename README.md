@@ -280,12 +280,21 @@ do about it. If it still cannot reach the tab it says so plainly and reloading t
 
 ## Products that already exist
 
-If Fygaro refuses a Code because it is already in use, the row is skipped and the run carries on. It shows
-as **Exists** in the Results list, and the export writes `Ya existe en Fygaro` into the `Nota` column. No
-link is captured for it, and nothing about the existing product is changed.
+If Fygaro refuses a Code because it is already in use, that does not settle the row. The product exists,
+but it may well have no payment link, which is the thing the run is for. So it goes and finds out:
 
-Reloading the catalog later brings such a row back as pending, and it will be detected and skipped again.
-That costs about a second rather than the forty seconds it used to take before this was recognised.
+1. It searches the payment links for that exact code.
+2. **A link is already there.** The row is skipped. It shows as **Exists** in the Results list and the
+   export writes `Ya existe en Fygaro y ya tiene su link` into the `Nota` column. Nothing about the
+   existing product or its link is changed.
+3. **No link.** It opens that product and makes one, exactly as it would have done had it just created
+   the product. The row finishes normally, with its link in column I.
+
+The code must match exactly. Fygaro's search matches on substrings, so looking for `CT-ING-PRE-EQ-01`
+also turns up `CT-ING-PRE-EQ-010`, and taking that as this row's link would leave the row quietly wrong.
+
+Finding the product again uses the same search, because the products list is paginated: one created months
+ago can be two thousand rows down where nothing on screen would ever show it.
 
 ---
 
@@ -467,9 +476,9 @@ npm run lint       # syntax, house rules, and manifest references
 | `tests/price.test.mjs` | 9 | Every one of the 2073 real prices, cross checked against a separate reference implementation |
 | `tests/state.test.mjs` | 11 | Run state, routes, and that a run saved by an older version gains every setting added since |
 | `tests/xlsx.test.mjs` | 14 | ZIP round trips, style preservation, XML escaping, writing a column the sheet has no cells for, and that an unedited rewrite reproduces every part byte for byte |
-| `tests/selectors.test.html` | 69 | Every locator, run against the nine captured page snapshots, plus the steps waiting for controls that render late |
+| `tests/selectors.test.html` | 77 | Every locator, run against the nine captured page snapshots, plus the steps waiting for controls that render late |
 | `tests/xlsx.test.html` | 26 | Workbook reading, sheet and column detection, the drawing that anchors the photos, patch and re read |
-| `tests/integration.test.html` | 35 | The real side panel driving the real worker through a full run |
+| `tests/integration.test.html` | 38 | The real side panel driving the real worker through a full run |
 
 > [!CAUTION]
 > **`tests/xlsx.test.mjs` reads the real catalog** from `docs/Catálogo de Productos y Servicios Fygaro.xlsx`,

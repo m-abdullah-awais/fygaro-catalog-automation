@@ -154,6 +154,7 @@
           productUuid: result.productUuid || '',
           landedRoute: result.landedRoute || '',
           duplicate: result.duplicate || '',
+          linkExists: !!result.linkExists,
           imageName: result.imageName || ''
         });
       })

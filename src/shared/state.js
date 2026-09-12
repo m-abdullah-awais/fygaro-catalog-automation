@@ -59,7 +59,13 @@
     OPEN_PRODUCT: 'OPEN_PRODUCT',
     CLICK_CREATE_LINK: 'CLICK_CREATE_LINK',
     FILL_LINK: 'FILL_LINK',
-    CAPTURE_LINK: 'CAPTURE_LINK'
+    CAPTURE_LINK: 'CAPTURE_LINK',
+    /*
+     * Not part of the seven. This runs only when Fygaro says the code is
+     * already taken, to find out whether that product already has a link, and
+     * it rejoins the ordinary flow or ends the row depending on the answer.
+     */
+    CHECK_LINK: 'CHECK_LINK'
   };
 
   S.STEP_ORDER = [
@@ -79,7 +85,8 @@
     OPEN_PRODUCT: 'Open the new product',
     CLICK_CREATE_LINK: 'Start the Fygaro Link',
     FILL_LINK: 'Fill the link form',
-    CAPTURE_LINK: 'Capture the link'
+    CAPTURE_LINK: 'Capture the link',
+    CHECK_LINK: 'Look for an existing link'
   };
 
   /** Messages exchanged between the side panel, the worker and the page. */
@@ -125,6 +132,8 @@
   S.IMAGE_CHUNK_BYTES = 512 * 1024;
 
   S.APP_URL = 'https://www.fygaro.com/en/app/dashboard/';
+  S.PRODUCTS_URL = 'https://www.fygaro.com/en/app/products/';
+  S.LINKS_URL = 'https://www.fygaro.com/en/app/payment-buttons/payments/payment-buttons/';
   S.ORIGIN = 'https://www.fygaro.com';
 
   /** Headers the catalog is expected to use, with tolerated alternatives. */
@@ -195,7 +204,8 @@
     OPEN_PRODUCT: 'productList',
     CLICK_CREATE_LINK: 'productDetail',
     FILL_LINK: 'linkAdd',
-    CAPTURE_LINK: 'linkDone'
+    CAPTURE_LINK: 'linkDone',
+    CHECK_LINK: 'linkList'
   };
 
   /** Names the current path, or an empty string when it is not one we drive. */

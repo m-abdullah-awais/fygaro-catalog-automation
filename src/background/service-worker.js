@@ -552,16 +552,40 @@ handlers[S.MSG.STEP_DONE] = function (msg, bucket, sender) {
    * already existing and the run moves straight on to the next one, rather than
    * spending two full step timeouts and then stopping for a human.
    */
+  /*
+   * Fygaro refuses a Code that is already taken and stays on the form, so
+   * nothing was created. That does not settle the row though: the product
+   * exists, but it may well have no payment link, which is the whole thing this
+   * run is for. Go and find out before deciding.
+   */
   if (msg.step === S.STEP.FILL_PRODUCT && msg.duplicate) {
-    row.reason = S.SKIP.EXISTS;
-    row.error = 'Ya existe en Fygaro. Nothing was created and no link was captured.';
-    bucket.rowsDirty = true;
-    log(bucket, 'warn', 'Row ' + row.sheetRow + ' (' + row.code + ') skipped, it already exists in ' +
-      'Fygaro: ' + U.truncate(msg.duplicate, 120));
+    log(bucket, 'info', 'Row ' + row.sheetRow + ' (' + row.code + ') already exists in Fygaro. ' +
+      'Checking whether it has a link.');
     bucket.logDirty = true;
-    return completeRowAndRestart(bucket, S.ROW.SKIPPED).then(function () {
-      return { ok: true };
-    });
+    run.step = S.STEP.CHECK_LINK;
+    return navigate(run, S.LINKS_URL).then(function () { return { ok: true }; });
+  }
+
+  if (msg.step === S.STEP.CHECK_LINK) {
+    if (msg.linkExists) {
+      row.reason = S.SKIP.EXISTS;
+      row.error = 'Ya existe en Fygaro y ya tiene su link.';
+      bucket.rowsDirty = true;
+      log(bucket, 'warn', 'Row ' + row.sheetRow + ' (' + row.code + ') skipped: it already exists in ' +
+        'Fygaro and already has a link.');
+      bucket.logDirty = true;
+      return completeRowAndRestart(bucket, S.ROW.SKIPPED).then(function () {
+        return { ok: true };
+      });
+    }
+
+    // The product is there but has no link, so the rest of the row is exactly
+    // the work that follows creating one: open it, make the link, capture it.
+    log(bucket, 'info', 'Row ' + row.sheetRow + ' (' + row.code + ') exists but has no link. ' +
+      'Creating one for the product that is already there.');
+    bucket.logDirty = true;
+    run.step = S.STEP.OPEN_PRODUCT;
+    return navigate(run, S.PRODUCTS_URL).then(function () { return { ok: true }; });
   }
 
   if (msg.step === S.STEP.FILL_PRODUCT && msg.imageName) {
