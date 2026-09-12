@@ -293,6 +293,11 @@ but it may well have no payment link, which is the thing the run is for. So it g
 The code must match exactly. Fygaro's search matches on substrings, so looking for `CT-ING-PRE-EQ-01`
 also turns up `CT-ING-PRE-EQ-010`, and taking that as this row's link would leave the row quietly wrong.
 
+The search panel remembers whichever category was used last, so it opens on Invoices as readily as on
+Fygaro Links. It is switched to the right one first, and a "No Results" is only believed while the payment
+links are actually the list on screen. Believing it from the wrong list would say a product has no link
+when it has one, and a second link would be made for it.
+
 Finding the product again uses the same search, because the products list is paginated: one created months
 ago can be two thousand rows down where nothing on screen would ever show it.
 
@@ -476,7 +481,7 @@ npm run lint       # syntax, house rules, and manifest references
 | `tests/price.test.mjs` | 9 | Every one of the 2073 real prices, cross checked against a separate reference implementation |
 | `tests/state.test.mjs` | 11 | Run state, routes, and that a run saved by an older version gains every setting added since |
 | `tests/xlsx.test.mjs` | 14 | ZIP round trips, style preservation, XML escaping, writing a column the sheet has no cells for, and that an unedited rewrite reproduces every part byte for byte |
-| `tests/selectors.test.html` | 77 | Every locator, run against the nine captured page snapshots, plus the steps waiting for controls that render late |
+| `tests/selectors.test.html` | 78 | Every locator, run against the nine captured page snapshots, plus the steps waiting for controls that render late |
 | `tests/xlsx.test.html` | 26 | Workbook reading, sheet and column detection, the drawing that anchors the photos, patch and re read |
 | `tests/integration.test.html` | 38 | The real side panel driving the real worker through a full run |
 

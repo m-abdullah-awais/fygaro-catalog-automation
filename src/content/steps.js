@@ -45,6 +45,19 @@
   // panel calls unlinked gets created in Fygaro a second time.
   var LINK_PATTERN = U.LINK_PATTERN;
 
+  /*
+   * The category the search has to be looking at, folded for matching.
+   *
+   * The panel remembers whichever category was used last, so it opens on
+   * Invoices as readily as on anything else. Reading a "No Results" off the
+   * wrong list would say a product has no payment link when it has one, and the
+   * run would go and make a second.
+   */
+  var SEARCH_CATEGORY = {
+    links: ['fygaro links', 'links fygaro', 'enlaces fygaro'],
+    products: ['products', 'productos']
+  };
+
   /* What the search panel says when it matched nothing, folded for matching. */
   var NO_RESULTS_TEXT = ['no results', 'sin resultados', 'no hay resultados'];
 
@@ -232,6 +245,40 @@
    */
   locate.searchBox = function (scope) {
     return D.control('input[type="search"][name="search"]', scope);
+  };
+
+  /**
+   * The list of category tabs in the search panel.
+   *
+   * It is the one list in the panel whose items are plain text: every other
+   * list on the page, the navigation and the results alike, wraps its items in
+   * links.
+   */
+  function categoryTabs(scope) {
+    var lists = D.all('ul', scope).filter(function (ul) {
+      return !ul.querySelector('a') && ul.querySelectorAll('li').length >= 3;
+    });
+    return lists.length ? Array.prototype.slice.call(lists[0].querySelectorAll('li')) : [];
+  }
+
+  /** One category tab, by what it says. */
+  locate.searchCategoryTab = function (scope, labels) {
+    return categoryTabs(scope).filter(function (li) {
+      return labels.indexOf(U.foldText(li.textContent)) !== -1;
+    })[0] || null;
+  };
+
+  /**
+   * Whether the search is currently looking at the wanted category.
+   *
+   * The chosen tab is the only one carrying a class at all. Which class that is
+   * is content hashed and changes on every deploy, so only its presence counts.
+   */
+  locate.searchCategoryIs = function (scope, labels) {
+    var chosen = categoryTabs(scope).filter(function (li) {
+      return !!(li.getAttribute('class') || '').trim();
+    })[0];
+    return !!chosen && labels.indexOf(U.foldText(chosen.textContent)) !== -1;
   };
 
   /** True when the search panel is showing its empty state. */
@@ -689,12 +736,36 @@
    * The panel covers whatever is underneath, so leaving a search in place would
    * hide the very list the next step is about to work on.
    */
-  function searchFor(term, settings) {
+  function searchFor(term, settings, category) {
     var box = locate.searchBox();
     if (!box) fail('The search box was not found in the Fygaro header.');
     D.reveal(box);
     if (!D.fillText(box, term)) fail('The search box did not keep "' + term + '".');
-    return pause(settings).then(function () { return box; });
+
+    if (!category) return pause(settings).then(function () { return box; });
+
+    /*
+     * The panel opens on whichever category was used last, which in practice is
+     * as likely to be Invoices as anything else, and its answer about a
+     * different kind of record is worse than no answer at all.
+     */
+    return D.waitFor(function () { return locate.searchCategoryTab(null, category); },
+      settings.stepTimeoutMs, 'the search categories')
+      .catch(function () {
+        fail('The search panel did not offer its categories, so the results could be about anything.');
+      })
+      .then(function (tab) {
+        // Clicked whether or not it looks chosen already: reading the chosen
+        // one relies on a hashed class, and clicking again costs nothing.
+        D.click(tab);
+        return D.waitFor(function () { return locate.searchCategoryIs(null, category); },
+          settings.stepTimeoutMs, 'the search to switch category')
+          .catch(function () {
+            fail('The search would not switch to the right category, so its results cannot be trusted.');
+          });
+      })
+      .then(function () { return pause(settings); })
+      .then(function () { return box; });
   }
 
   function clearSearch() {
@@ -714,11 +785,15 @@
     var row = job.row;
     var settings = job.settings;
 
-    return searchFor(row.code, settings)
+    return searchFor(row.code, settings, SEARCH_CATEGORY.links)
       .then(function () {
         return D.waitFor(function () {
+          // A hit proves itself: only a payment link has this shape of address.
           if (locate.linkSearchResult(null, row.code)) return 'found';
-          if (locate.searchFoundNothing()) return 'none';
+          // A miss does not, so it only counts while the right list is showing.
+          if (locate.searchFoundNothing() && locate.searchCategoryIs(null, SEARCH_CATEGORY.links)) {
+            return 'none';
+          }
           return null;
         }, settings.stepTimeoutMs, 'the search for ' + row.code)
           .catch(function () {
@@ -751,7 +826,7 @@
     return D.waitFor(find, Math.min(settings.stepTimeoutMs, 4000), 'the product in the list')
       .catch(function () {
         if (!locate.searchBox()) return null;
-        return searchFor(row.code, settings).then(function () {
+        return searchFor(row.code, settings, SEARCH_CATEGORY.products).then(function () {
           return D.waitFor(find, settings.stepTimeoutMs, 'the product in the search results')
             .catch(function () { return null; });
         });

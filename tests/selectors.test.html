@@ -1067,9 +1067,51 @@
         }).then(function () {
           throw new Error('it should not have returned an answer');
         }, function (err) {
-          assert(/neither a result nor an empty answer/.test(err.message),
+          assert(/did not offer its categories/.test(err.message),
             'unhelpful message: ' + err.message);
           return 'refused to guess';
+        });
+      });
+    })
+    .then(function () {
+      return checkLater('the link check switches away from whatever category was last used', function () {
+        /*
+         * The panel remembers the last category used, so it opens on Invoices
+         * as readily as on anything else. Believing a "No Results" from there
+         * would say a product has no payment link when it has one, and the run
+         * would go and make a second.
+         */
+        var scope = mount('links-with-header');
+        var tabs = D.all('ul', scope).filter(function (ul) {
+          return !ul.querySelector('a') && ul.querySelectorAll('li').length >= 3;
+        })[0];
+        assert(tabs, 'the snapshot should have the category tabs');
+
+        var byName = {};
+        Array.prototype.forEach.call(tabs.querySelectorAll('li'), function (li) {
+          byName[U.foldText(li.textContent)] = li;
+          // Stand in for the app: choosing a category moves the mark to it.
+          li.addEventListener('click', function () {
+            Array.prototype.forEach.call(tabs.querySelectorAll('li'), function (other) {
+              other.setAttribute('class', '');
+            });
+            li.setAttribute('class', 'chosen');
+          });
+        });
+
+        // Start it where the bug put it.
+        byName['fygaro links'].setAttribute('class', '');
+        byName.invoices.setAttribute('class', 'chosen');
+        assert(locate.searchCategoryIs(scope, ['fygaro links']) === false, 'setup failed');
+
+        return FYG.steps[S.STEP.CHECK_LINK]({
+          settings: IMPATIENT,
+          row: { sheetRow: 9, code: 'CT-ING-PRE-EQ-01' }
+        }).then(function (result) {
+          assert(locate.searchCategoryIs(scope, ['fygaro links']),
+            'it read the results without moving to the payment links');
+          assert(result.linkExists === false, 'it should report no link, once looking in the right place');
+          return 'moved off Invoices before believing anything';
         });
       });
     })
