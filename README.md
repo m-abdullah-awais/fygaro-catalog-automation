@@ -272,6 +272,10 @@ on the run being prepared below it.
 It stops on its own when the button disappears, when a press brings back no new rows, or after 600
 presses, whichever comes first. Progress appears in the Activity log every ten presses.
 
+If the extension has been reloaded since the Fygaro tab was opened, the helper already in that tab is
+orphaned and cannot answer. The panel notices, puts a fresh copy in and asks again, so there is nothing to
+do about it. If it still cannot reach the tab it says so plainly and reloading the tab fixes it.
+
 ---
 
 ## Products that already exist

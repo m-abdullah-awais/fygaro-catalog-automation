@@ -23,7 +23,8 @@
     "storage",
     "sidePanel",
     "tabs",
-    "notifications"
+    "notifications",
+    "scripting"
   ],
   "host_permissions": [
     "https://www.fygaro.com/*"

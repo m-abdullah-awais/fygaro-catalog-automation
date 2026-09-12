@@ -1085,6 +1085,38 @@
   /** Writes the produced workbook straight back into the file on disk. */
 
   /**
+   * Puts a fresh copy of the content scripts into a tab.
+   *
+   * The file list comes from the manifest rather than being written out again
+   * here, so the two cannot drift apart.
+   */
+  function injectContentScripts(tabId) {
+    var declared = (chrome.runtime.getManifest().content_scripts || [])[0];
+    if (!chrome.scripting || !declared || !declared.js) {
+      return Promise.reject(new Error('This browser cannot inject the helper into the page.'));
+    }
+    return chrome.scripting.executeScript({ target: { tabId: tabId }, files: declared.js });
+  }
+
+  /**
+   * Sends a message to the page, putting the helper there first if it is not.
+   *
+   * Reloading the extension leaves the copy already in an open tab orphaned: it
+   * keeps running but its link back to the extension is dead, so a message finds
+   * nothing listening and Chrome answers "Receiving end does not exist". A tab
+   * that was open before the extension was installed never had one at all.
+   * Either way the answer is the same, and it is not something to make someone
+   * reload a tab over.
+   */
+  function tellFygaroTab(tabId, message) {
+    return chrome.tabs.sendMessage(tabId, message).catch(function () {
+      return injectContentScripts(tabId).then(function () {
+        return chrome.tabs.sendMessage(tabId, message);
+      });
+    });
+  }
+
+  /**
    * Presses More Results on whichever Fygaro list is open, until it runs out.
    *
    * The tab is messaged directly rather than through the worker. Every other
@@ -1107,7 +1139,7 @@
           throw new Error('No Fygaro tab is open. Press Open Fygaro first, then go to the products ' +
             'or payment links list.');
         }
-        return chrome.tabs.sendMessage(tabs[0].id, {
+        return tellFygaroTab(tabs[0].id, {
           type: S.MSG.LOAD_ALL,
           minDelayMs: view.run.settings.minDelayMs,
           maxDelayMs: view.run.settings.maxDelayMs
@@ -1119,8 +1151,13 @@
           result.clicks + ' click' + (result.clicks === 1 ? '' : 's') + ', ' + result.stopped + '.';
       })
       .catch(function (err) {
-        $('loadAllHint').textContent = 'Could not load the list: ' +
-          (err && err.message ? err.message : String(err));
+        var message = err && err.message ? err.message : String(err);
+        // Chrome's own wording for this is "Receiving end does not exist",
+        // which says nothing to anyone who has not written an extension.
+        if (/Receiving end|Could not establish connection/i.test(message)) {
+          message = 'the Fygaro tab could not be reached. Reload that tab and try again.';
+        }
+        $('loadAllHint').textContent = 'Could not load the list: ' + message;
       })
       .then(function () {
         button.disabled = false;

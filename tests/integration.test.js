@@ -21,9 +21,17 @@
 
   var results = [];
   var recorded = { badges: [], notifications: [], tabUpdates: [], downloads: [], actions: [],
-                   alerts: [], confirms: [] };
+                   alerts: [], confirms: [], tabMessages: [], injections: [] };
   var currentZoom = 1;
   var zoomFailuresLeft = 0;
+
+  /* Whether a live content script is listening in the Fygaro tab. */
+  var contentScriptPresent = false;
+  var pageAnswer = null;
+  /* Set by a test that needs chrome.tabs.query to find an open Fygaro tab. */
+  var fygaroTab = null;
+  /* The real manifest, so an injection test cannot drift from what ships. */
+  var manifestJson = { content_scripts: [{ js: [] }] };
 
   /* Stands in for a real FileSystemFileHandle, so the in place save path is
    * exercised rather than mocked away. */
@@ -107,6 +115,7 @@
     runtime: {
       lastError: null,
       getURL: function (path) { return 'chrome-extension://test/' + path; },
+      getManifest: function () { return manifestJson; },
       sendMessage: function (message) {
         return new Promise(function (resolve) {
           var answered = false;
@@ -178,7 +187,12 @@
       create: function (options, cb) { recorded.notifications.push(options); if (cb) cb('id'); }
     },
     tabs: {
-      query: function () { return Promise.resolve([]); },
+      query: function (q) {
+        // Only a test that has deliberately opened one finds a tab, so the
+        // worker's own open-or-create path keeps behaving as it always did.
+        if (fygaroTab && q && q.url) return Promise.resolve([fygaroTab]);
+        return Promise.resolve([]);
+      },
       create: function (props) {
         var tab = { id: nextTabId++, url: props.url };
         recorded.tabUpdates.push(props.url);
@@ -203,7 +217,28 @@
         recorded.actions.push('zoom:' + factor);
         return Promise.resolve();
       },
-      onRemoved: { addListener: function () {} }
+      onRemoved: { addListener: function () {} },
+
+      /*
+       * Stands in for the page. The first send bounces the way Chrome does when
+       * the copy of the content script in an open tab has been orphaned by an
+       * extension reload, and only answers once something has been injected.
+       */
+      sendMessage: function (tabId, message) {
+        recorded.tabMessages.push(message);
+        if (!contentScriptPresent) {
+          return Promise.reject(new Error(
+            'Could not establish connection. Receiving end does not exist.'));
+        }
+        return Promise.resolve(pageAnswer);
+      }
+    },
+    scripting: {
+      executeScript: function (details) {
+        recorded.injections.push(details);
+        contentScriptPresent = true;
+        return Promise.resolve([]);
+      }
     },
     sidePanel: { setPanelBehavior: function () { return Promise.resolve(); } }
   };
@@ -581,6 +616,74 @@
                 return rebuilt.length + ' bytes rebuilt, checksum matches';
               });
             });
+          });
+      });
+    })
+
+    .then(function () {
+      return check('Load all puts the helper back when the tab has lost it', function () {
+        /*
+         * Reloading the extension orphans the content script already in an open
+         * tab: it keeps running but its link back to the extension is dead, so
+         * Chrome answers "Receiving end does not exist". That is not something
+         * to make someone reload a tab over, so the panel injects a fresh copy
+         * and asks again.
+         */
+        fygaroTab = { id: 7, url: S.ORIGIN + '/en/app/payment-buttons/payments/payment-buttons/' };
+        contentScriptPresent = false;
+        pageAnswer = {
+          ok: true, kind: 'links', rows: 240, added: 220, clicks: 11,
+          stopped: 'the list ran out of pages'
+        };
+        recorded.tabMessages.length = 0;
+        recorded.injections.length = 0;
+
+        $('btnLoadAll').click();
+
+        return waitUntil(function () { return /240 links/.test($('loadAllHint').textContent); },
+          'the loaded list to be reported')
+          .then(function () {
+            assert(recorded.injections.length === 1,
+              'expected one injection, saw ' + recorded.injections.length);
+
+            var files = recorded.injections[0].files;
+            assert(files.indexOf('src/content/loadall.js') !== -1,
+              'the list loader was not among the injected files: ' + files.join(', '));
+            assert(files.indexOf('src/content/main.js') !== -1,
+              'the listener was not among the injected files: ' + files.join(', '));
+            assert(recorded.injections[0].target.tabId === 7, 'it injected into the wrong tab');
+
+            assert(recorded.tabMessages.length === 2,
+              'expected a bounce then a retry, saw ' + recorded.tabMessages.length);
+            assert(recorded.tabMessages[1].type === S.MSG.LOAD_ALL, 'the retry carried the wrong message');
+            assert(/ran out of pages/.test($('loadAllHint').textContent),
+              'the reason was lost: ' + $('loadAllHint').textContent);
+            return 'bounced, injected, retried, reported 240 links';
+          });
+      });
+    })
+
+    .then(function () {
+      return check('Load all does not re-inject when the page is already listening', function () {
+        // Injecting a second copy on top of a live one would double every timer
+        // the content script runs, so it must only happen after a real bounce.
+        contentScriptPresent = true;
+        pageAnswer = {
+          ok: true, kind: 'products', rows: 18, added: 0, clicks: 0,
+          stopped: 'everything was already loaded'
+        };
+        recorded.tabMessages.length = 0;
+        recorded.injections.length = 0;
+
+        $('btnLoadAll').click();
+
+        return waitUntil(function () { return /18 products/.test($('loadAllHint').textContent); },
+          'the reply to be reported')
+          .then(function () {
+            assert(recorded.injections.length === 0, 'it injected on top of a live content script');
+            assert(recorded.tabMessages.length === 1, 'it asked more than once');
+            fygaroTab = null;
+            return 'asked once, injected nothing';
           });
       });
     })
@@ -1250,7 +1353,11 @@
 
   /* ------------------------------------------------------------------ boot */
 
-  fetch(WORKBOOK_PATH)
+  fetch('../manifest.json')
+    .then(function (r) { return r.json(); })
+    .then(function (parsed) { manifestJson = parsed; })
+    .catch(function () {})
+    .then(function () { return fetch(WORKBOOK_PATH); })
     .then(function (response) {
       if (!response.ok) throw new Error('the workbook could not be read: status ' + response.status);
       return response.arrayBuffer();
