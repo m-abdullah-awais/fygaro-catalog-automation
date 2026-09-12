@@ -255,9 +255,19 @@ applied.
 Fygaro shows its products and its payment links a page at a time, with a **More Results** button at the
 foot. On a catalog of this size that is a hundred presses to see everything.
 
-Open either list in the Fygaro tab and press **Load all rows** in the Run card. It presses More Results
-until the list runs out, pacing itself with the same delays as a run, and reports how many rows it ended
-up with. It only reads and clicks: nothing is created, changed or saved, and the run is not touched.
+Open either list in the Fygaro tab and press **Load all rows**, at the top of the panel. It presses More
+Results until the list runs out, pacing itself with the same delays as a run, and reports how many rows it
+ended up with. It only reads and clicks: nothing is created, changed or saved, and the run is not touched.
+
+The two lists it recognises are:
+
+| Page | URL |
+|------|-----|
+| Payment links | `https://www.fygaro.com/en/app/payment-buttons/payments/payment-buttons/` |
+| Products | `https://www.fygaro.com/en/app/products/` |
+
+It sits above the numbered steps because it acts on whatever is already open in the Fygaro tab, rather than
+on the run being prepared below it.
 
 It stops on its own when the button disappears, when a press brings back no new rows, or after 600
 presses, whichever comes first. Progress appears in the Activity log every ten presses.

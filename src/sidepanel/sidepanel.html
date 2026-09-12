@@ -28,6 +28,22 @@
     </div>
   </section>
 
+  <!--
+    Unnumbered on purpose, and first. This acts on whatever is already open in
+    the Fygaro tab rather than on the run being prepared below it, so it is not
+    a step in that sequence and numbering it would imply an order that does not
+    exist.
+  -->
+  <section class="card">
+    <h2>Fygaro list</h2>
+    <p class="hint" style="margin-top:0">Fygaro shows its products and its payment links a page at a time.
+      Open either list in the Fygaro tab and this presses More Results until every row is on screen.</p>
+    <div class="row-of-buttons">
+      <button type="button" class="subtle" id="btnLoadAll">Load all rows</button>
+    </div>
+    <p class="hint" id="loadAllHint"></p>
+  </section>
+
   <!-- 1. Catalog -->
   <section class="card">
     <h2><span class="num">1</span> Catalog <span class="spacer"></span>
@@ -194,10 +210,7 @@
     <p class="hint" id="runHint">Open Fygaro and sign in first, then press Start.</p>
     <div class="row-of-buttons" style="margin-top:8px">
       <button type="button" class="subtle" id="btnOpenFygaro">Open Fygaro</button>
-      <button type="button" class="subtle" id="btnLoadAll">Load all rows</button>
     </div>
-    <p class="hint" id="loadAllHint">Fygaro shows its products and its payment links a page at a time.
-      Open either list in the Fygaro tab and this presses More Results until every row is on screen.</p>
   </section>
 
   <!-- 5. Results -->
