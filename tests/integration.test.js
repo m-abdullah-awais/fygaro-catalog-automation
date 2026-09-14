@@ -36,6 +36,8 @@
   /* Stands in for a real FileSystemFileHandle, so the in place save path is
    * exercised rather than mocked away. */
   var savedToDisk = null;
+  /* What the file on disk holds, which unlike savedToDisk is never reset. */
+  var onDisk = null;
   var handlePermission = 'granted';
   var fakeHandle = null;
 
@@ -85,15 +87,24 @@
       });
   }
 
-  function waitUntil(probe, label, timeoutMs) {
+  /**
+   * @param {function} probe truthy when the wait is over
+   * @param {string} label named in the timeout
+   * @param {number} [timeoutMs]
+   * @param {function} [pump] run before each probe, for a condition that can
+   *   only be read asynchronously. Its promise is awaited.
+   */
+  function waitUntil(probe, label, timeoutMs, pump) {
     var deadline = Date.now() + (timeoutMs || 5000);
     return new Promise(function (resolve, reject) {
       (function poll() {
-        var value;
-        try { value = probe(); } catch (e) { value = null; }
-        if (value) return resolve(value);
-        if (Date.now() > deadline) return reject(new Error('Timed out waiting for ' + label));
-        setTimeout(poll, 20);
+        Promise.resolve(pump ? pump() : null).catch(function () {}).then(function () {
+          var value;
+          try { value = probe(); } catch (e) { value = null; }
+          if (value) return resolve(value);
+          if (Date.now() > deadline) return reject(new Error('Timed out waiting for ' + label));
+          setTimeout(poll, 20);
+        });
       })();
     });
   }
@@ -110,6 +121,30 @@
   }
 
   window.importScripts = function () {}; // the shared files are already loaded
+
+  /*
+   * A real FileSystemFileHandle survives structured cloning, which is how the
+   * panel remembers one from one opening of the side panel to the next. The fake
+   * below carries its methods as own properties, so IndexedDB refuses to store
+   * it, and the panel would come back up with no handle and never look at the
+   * file. Only the handles store is stood in for. The workbook and the pictures
+   * go through the real database, because their size is the whole reason it is
+   * being used.
+   */
+  var handleStore = {};
+  var realIdbRun = FYG.idb.run;
+  FYG.idb.run = function (storeNames, mode, action) {
+    if ([].concat(storeNames)[0] !== 'handles') return realIdbRun(storeNames, mode, action);
+    var fake = {
+      get: function (key) { return { result: handleStore[key] }; },
+      put: function (value, key) { handleStore[key] = value; return {}; },
+      delete: function (key) { delete handleStore[key]; return {}; },
+      clear: function () { handleStore = {}; return {}; }
+    };
+    return Promise.resolve()
+      .then(function () { return action(fake, null); })
+      .then(function (request) { return request ? request.result : undefined; });
+  };
 
   window.chrome = {
     runtime: {
@@ -269,6 +304,39 @@
     });
   }
 
+  /*
+   * Closes the side panel and opens it again.
+   *
+   * Everything the panel held in memory goes, and it has to find its way back
+   * from storage, the cached workbook and the file, which is the state that any
+   * run spread over several days spends most of its life in.
+   *
+   * The instance being replaced has to stop listening first. Its own nodes are
+   * about to be thrown away, but it looks elements up by id in the live
+   * document, so a storage change would have it render its stale view into the
+   * panel that replaced it.
+   */
+  /* Resolves once the panel has written a line matching pattern to the log. */
+  function waitForLog(pattern, label) {
+    var seen = null;
+    return waitUntil(function () {
+      return seen;
+    }, label, 20000, function () {
+      return readState().then(function (data) {
+        seen = (data.log || []).filter(function (e) { return pattern.test(e.message); }).pop() || null;
+      });
+    }).then(function () { return seen; });
+  }
+
+  function reopenPanel() {
+    messageListeners.length = workerListeners.messages;
+    storageListeners.length = workerListeners.storage;
+    document.getElementById('panel').innerHTML = '';
+    return mountPanelMarkup().then(function () {
+      return loadScript('../src/sidepanel/sidepanel.js');
+    });
+  }
+
   function mountPanelMarkup() {
     return fetch('../src/sidepanel/sidepanel.html')
       .then(function (r) { return r.text(); })
@@ -333,6 +401,9 @@
   /* ----------------------------------------------------------------- suite */
 
   var workbookBytes = null;
+  /* How many listeners the worker alone had registered, so a reopen can drop
+   * exactly the ones the panel added and no others. */
+  var workerListeners = { messages: 0, storage: 0 };
 
   function suite() {
     return check('the panel markup and script load without errors', function () {
@@ -1455,6 +1526,212 @@
     })
 
     .then(function () {
+      return check('reopening the panel catches up with links the sheet gained', function () {
+        /*
+         * The rows are worked out once and then live in the worker for days. A
+         * link written into the sheet after that was invisible until something
+         * made the panel rebuild, so the row was handed to Fygaro, refused for a
+         * code already in use, and the run went looking for the link the sheet
+         * was holding all along. Reopening the panel is when that is cheapest to
+         * notice, and it is also when the panel has least in memory.
+         */
+        var planted = 'https://www.fygaro.com/en/pb/eeeeeeee-5555-5555-5555-555555555555/';
+        var plantedRow = 0;
+
+        handlePermission = 'granted';
+        savedToDisk = null;
+        $('targetOriginal').checked = true;
+        $('targetOriginal').dispatchEvent(new Event('change'));
+
+        return chrome.runtime.sendMessage({ type: S.MSG.STOP })
+          // Write what has been captured into the file itself, so the file and
+          // the panel agree before anything is taken away from either.
+          .then(function () {
+            return waitUntil(function () { return !$('btnExportXlsx').disabled; }, 'the last save to settle');
+          })
+          .then(function () { $('btnExportXlsx').click(); })
+          .then(function () {
+            return waitUntil(function () {
+              return savedToDisk && !$('btnExportXlsx').disabled;
+            }, 'the file to be written', 20000);
+          })
+          .then(readState)
+          .then(function (data) {
+            /*
+             * A link put into the file behind the panel's back, in a row it has
+             * never had one for. Nothing but reading the file can find this, so
+             * it is what tells a panel that reads the file apart from one that
+             * trusts the copy it cached.
+             */
+            var spare = data.rows.filter(function (r) {
+              return !r.link && r.status === S.ROW.PENDING;
+            })[0];
+            assert(spare, 'there should be a row still to do');
+            plantedRow = spare.sheetRow;
+
+            return onDisk.arrayBuffer()
+              .then(function (buffer) { return X.load(new Uint8Array(buffer)); })
+              .then(function (wb) {
+                return X.writeColumns(wb, SHEET, [
+                  { column: data.run.file.mapping.link, updates: [{ row: plantedRow, value: planted }] }
+                ]);
+              })
+              .then(function (blob) { onDisk = blob; return data; });
+          })
+          .then(function (data) {
+            var done = data.rows.filter(function (r) { return r.link; });
+            assert(done.length > 0, 'the run should have captured links by now');
+
+            // Put the catalog back the way a session from before this fix left
+            // it: the links are in the file, the row table has never heard of
+            // them. Nothing else about the rows is touched.
+            var rows = data.rows.map(function (r) {
+              if (!r.link) return r;
+              var stale = {};
+              Object.keys(r).forEach(function (k) { stale[k] = r[k]; });
+              stale.link = '';
+              stale.status = S.ROW.PENDING;
+              stale.reason = '';
+              stale.finishedAt = null;
+              return stale;
+            });
+            var forgotten = done.map(function (r) { return r.sheetRow; }).concat([plantedRow]);
+            var run = data.run;
+            run.status = S.STATUS.IDLE;
+            run.stats = S.recount(rows);
+
+            var write = {};
+            write[S.KEY_ROWS] = rows;
+            write[S.KEY_RUN] = run;
+            return chrome.storage.local.set(write)
+              .then(reopenPanel)
+              .then(function () {
+                return waitForLog(/already had a link in the spreadsheet/,
+                  'the reopened panel to say it read the catalog again');
+              })
+              .then(readState)
+              .then(function (after) {
+                forgotten.forEach(function (sheetRow) {
+                  var now = after.rows.filter(function (r) { return r.sheetRow === sheetRow; })[0];
+                  assert(now, 'sheet row ' + sheetRow + ' vanished from the catalog');
+                  assert(now.status === S.ROW.SKIPPED,
+                    'sheet row ' + sheetRow + ' came back as ' + now.status + ' after reopening');
+                  assert(now.reason === S.SKIP.HAD_LINK,
+                    'sheet row ' + sheetRow + ' was skipped for "' + now.reason + '"');
+                  assert(U.isFygaroLink(now.link),
+                    'sheet row ' + sheetRow + ' came back with "' + now.link + '"');
+                });
+
+                /*
+                 * Restoring a session used to read the sheet its own shorter
+                 * way, which left the note column and the picture index unset.
+                 * Anything that rebuilt afterwards then created products with no
+                 * photo and stopped writing the reason a row was passed over,
+                 * neither of which says a word about itself at the time.
+                 */
+                assert(after.run.file.noteColumn,
+                  'the reopened panel lost the note column, so reasons stop being written');
+                var withPicture = after.rows.filter(function (r) { return r.imageId; });
+                assert(withPicture.length > 0,
+                  'the reopened panel lost every picture, so products would be created without one');
+                var plantedBack = after.rows.filter(function (r) { return r.sheetRow === plantedRow; })[0];
+                assert(plantedBack.link === planted,
+                  'the link written straight into the file was not picked up, row ' + plantedRow +
+                  ' reads "' + plantedBack.link + '"');
+                return forgotten.length + ' rows recognised from the file itself, pictures and notes intact';
+              });
+          });
+      });
+    })
+
+    .then(function () {
+      return check('a captured link that is not in the sheet yet is never rebuilt away', function () {
+        /*
+         * The catch up reads the sheet, so a link captured but not yet written
+         * into it would be dropped by the rebuild. Half a minute of Fygaro each,
+         * and no way to get them back, so the rows are left exactly as they are
+         * and the panel says why.
+         */
+        var unsaved = 'https://www.fygaro.com/en/pb/dddddddd-4444-4444-4444-444444444444/';
+        return readState().then(function (data) {
+          // One row holding a link the sheet has never seen, and one the sheet
+          // knows about that the rows have forgotten. Without the second there
+          // is nothing to rebuild for, and the first would survive by accident
+          // rather than because it is protected.
+          var stale = data.rows.filter(function (r) { return r.reason === S.SKIP.HAD_LINK; })[0];
+          assert(stale, 'the check before this one should have left rows skipped for their link');
+
+          var rows = data.rows.map(function (r) {
+            var copy = {};
+            Object.keys(r).forEach(function (k) { copy[k] = r[k]; });
+            if (r.sheetRow === 3) {
+              copy.link = unsaved;
+              copy.status = S.ROW.DONE;
+              copy.reason = '';
+              return copy;
+            }
+            if (r.sheetRow === stale.sheetRow) {
+              copy.link = '';
+              copy.status = S.ROW.PENDING;
+              copy.reason = '';
+              return copy;
+            }
+            return copy;
+          });
+          var run = data.run;
+          run.status = S.STATUS.IDLE;
+          run.stats = S.recount(rows);
+
+          var write = {};
+          write[S.KEY_ROWS] = rows;
+          write[S.KEY_RUN] = run;
+          return chrome.storage.local.set(write)
+            .then(reopenPanel)
+            .then(function () {
+              return waitForLog(/not in the spreadsheet yet/,
+                'the reopened panel to say it left the catalog alone');
+            })
+            .then(readState)
+            .then(function (after) {
+              var row = after.rows.filter(function (r) { return r.sheetRow === 3; })[0];
+              assert(row.link === unsaved,
+                'the unsaved link was thrown away, it now reads "' + row.link + '"');
+              assert(row.status === S.ROW.DONE, 'the row is "' + row.status + '", expected done');
+              return 'an unsaved link survived the reopen';
+            });
+        });
+      });
+    })
+
+    .then(function () {
+      return check('a file it may no longer read falls back to the cached copy', function () {
+        /*
+         * Permission to read a handle does not survive every restart, and it
+         * cannot be asked for while the panel is opening because there is no
+         * click behind that. Losing the file at that point would take the export
+         * with it, so the cached copy has to carry it.
+         */
+        handlePermission = 'denied';
+        return reopenPanel()
+          .then(function () {
+            return waitUntil(function () {
+              return $('sheetSelect').options.length > 0 && !$('btnExportXlsx').disabled;
+            }, 'the panel to come back up on the cached copy', 20000);
+          })
+          .then(readState)
+          .then(function (after) {
+            assert($('fileLoaded').classList.contains('hidden') === false,
+              'the panel came back with no file at all');
+            assert(after.rows.length > 0, 'the rows were lost');
+            assert(after.rows.filter(function (r) { return r.link; }).length > 0,
+              'the captured links were lost');
+            handlePermission = 'granted';
+            return 'came back up on the cached copy, links and all';
+          });
+      });
+    })
+
+    .then(function () {
       return check('Clear everything empties storage and resets the whole panel', function () {
         // Leave some interface state behind, so the reset has something to undo.
         $('search').value = 'CT-ING';
@@ -1565,7 +1842,7 @@
         queryPermission: function () { return Promise.resolve(handlePermission); },
         requestPermission: function () { return Promise.resolve(handlePermission); },
         getFile: function () {
-          return Promise.resolve(new File([workbookBytes], WORKBOOK_NAME,
+          return Promise.resolve(new File([onDisk || workbookBytes], WORKBOOK_NAME,
             { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
         },
         createWritable: function () {
@@ -1574,7 +1851,13 @@
           return Promise.resolve({
             write: function (blob) { chunks.push(blob); return Promise.resolve(); },
             // Only a close that is reached commits, mirroring the real API.
-            close: function () { savedToDisk = new Blob(chunks); return Promise.resolve(); }
+            close: function () {
+              savedToDisk = new Blob(chunks);
+              // Checks reset savedToDisk to watch for the next write. This is
+              // the file itself, so it only ever moves forward.
+              onDisk = savedToDisk;
+              return Promise.resolve();
+            }
           });
         }
       };
@@ -1584,6 +1867,9 @@
     })
     // The worker registers its message listener first, exactly as in the browser.
     .then(function () { return loadScript('../src/background/service-worker.js'); })
+    .then(function () {
+      workerListeners = { messages: messageListeners.length, storage: storageListeners.length };
+    })
     .then(function () { return loadScript('../src/sidepanel/sidepanel.js'); })
     .then(suite)
     .catch(function (err) {

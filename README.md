@@ -367,10 +367,15 @@ Either way, everything else in the workbook survives: all other sheets, formatti
 validations, drawings and the hyperlink that was already there. Only the cells in column `I` that gained a
 link differ.
 
-The workbook is cached inside the extension, so exporting still works after you close the panel or restart
-the browser. Every save updates that cached copy as well as the file, so the links you have already captured
-are still recognised as done when you come back to it tomorrow and start the next batch. If the cache is ever
-lost, load the same file again, or use the CSV export which needs no file at all.
+When you open the panel it reads your file again, so anything that has changed since, including links you
+pasted in by hand, is picked up. Rows that turn out to already have a link are set aside before the browser
+is opened at all. That only happens between runs, and never while a captured link is still waiting to be
+saved: the panel says so and leaves the catalog alone rather than risk losing one.
+
+A copy of the workbook is also cached inside the extension, and every save updates it. That copy is what
+keeps exporting alive when the file itself cannot be read, which happens if the browser stops trusting the
+permission you gave it. If the cache is ever lost too, load the same file again, or use the CSV export which
+needs no file at all.
 
 ---
 

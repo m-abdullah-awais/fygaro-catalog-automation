@@ -123,7 +123,66 @@
     });
   }
 
+  /*
+   * The file on disk, when this panel is still allowed to read it.
+   *
+   * The cached copy is a snapshot taken when the file was picked, and every save
+   * since has moved the file on without it. Trusting the snapshot is how a row
+   * whose link was written into the sheet hours ago still read as unfinished:
+   * it was handed to Fygaro, refused for a code already in use, and the run went
+   * off to the payment links to find a link the sheet was already holding.
+   *
+   * Nothing is asked for here. Permission has to be requested under a live
+   * click and a panel opening is not one, so a handle that has gone quiet falls
+   * back to the cache rather than throwing a prompt at nobody.
+   */
+  function readWorkbookFromFile() {
+    if (!fileHandle || typeof fileHandle.getFile !== 'function' || !fileHandle.queryPermission) {
+      return Promise.resolve(null);
+    }
+    var file = null;
+    return fileHandle.queryPermission({ mode: 'read' })
+      .then(function (state) { return state === 'granted' ? fileHandle.getFile() : null; })
+      .then(function (found) {
+        file = found;
+        return file ? file.arrayBuffer() : null;
+      })
+      .then(function (buffer) {
+        if (!buffer) return null;
+        var bytes = new Uint8Array(buffer);
+        return X.load(bytes).then(function (wb) {
+          workbook = wb;
+          fileName = file.name || fileName;
+          return refreshCacheFrom(file, bytes).then(function () { return wb; });
+        });
+      })
+      .catch(function () { return null; });
+  }
+
+  /*
+   * Writes the file into the cache, but only when the cache is actually behind.
+   *
+   * The cache is what keeps exporting alive once the handle is gone, so it is
+   * worth keeping current. It is also 66 MB, and rewriting that every time the
+   * panel is opened would be a real cost for nothing.
+   */
+  function refreshCacheFrom(file, bytes) {
+    return FYG.idb.run('workbook', 'readonly', function (store) {
+      return store.get('meta');
+    }).then(function (meta) {
+      var current = meta && meta.name === file.name && meta.size === file.size &&
+        meta.savedAt >= file.lastModified;
+      return current ? null : storeWorkbook(file.name, bytes);
+    }).catch(function () { return null; });
+  }
+
   function restoreWorkbook() {
+    return readWorkbookFromFile().then(function (fromFile) {
+      return fromFile || restoreCachedWorkbook();
+    });
+  }
+
+  function restoreCachedWorkbook() {
     var meta = null;
     return FYG.idb.run('workbook', 'readonly', function (store) {
       return store.get('meta');
@@ -595,10 +654,24 @@
     }).then(refresh);
   }
 
-  function loadSheet(name) {
+  /**
+   * Reads a sheet and works out which column holds what.
+   *
+   * Every context that puts a sheet in front of the panel goes through here, so
+   * none of them can quietly skip a piece of it. Restoring a session used to do
+   * its own shorter version, which left the note column and the picture index
+   * unset, and the next rebuild then created products with no photo and stopped
+   * writing the reason a row was passed over.
+   *
+   * @param {string} name
+   * @param {boolean} rereadImages false when only the worksheet can have moved,
+   *   which is the case after a save. The drawings are untouched by one.
+   * @returns {object} the columns the headers point at
+   */
+  function readSheetInto(name, rereadImages) {
     sheetData = workbook.readSheet(name);
     headerInfo = X.readHeader(sheetData);
-    imageIndex = readImagesSafely(name);
+    if (rereadImages || !imageIndex) imageIndex = readImagesSafely(name);
 
     var detected = {
       name: X.findColumn(headerInfo, S.HEADERS.name),
@@ -608,11 +681,11 @@
     };
 
     /*
-     * This catalog has no link column at all, and its last column holds the
-     * product images, so one is proposed just past everything the sheet uses.
-     * On the next run the header written by the export is found by findColumn
-     * above and nothing is proposed, which is what lets a restart skip the rows
-     * that are already done.
+     * This catalog arrived with no link column at all, and its last column holds
+     * the product images, so one is proposed just past everything the sheet
+     * uses. Once the export has written that header, findColumn above finds it
+     * and nothing is proposed, which is what lets a restart skip the rows that
+     * are already done.
      */
     proposed = { link: '', note: '' };
     if (!detected.link) {
@@ -624,6 +697,56 @@
       noteColumn = X.colName(X.colIndex(detected.link) + 1);
       proposed.note = noteColumn;
     }
+    return detected;
+  }
+
+  /**
+   * Reads the catalog again when the sheet has moved on without it.
+   *
+   * The rows are worked out once, when the catalog is loaded, and then live in
+   * the worker across restarts. So links written into the sheet after that,
+   * whether by this extension or by hand, are invisible until something makes
+   * the panel rebuild, and until then those rows are handed to Fygaro, refused
+   * for a code already in use, and sent looking for a link the sheet has.
+   *
+   * Only done between runs, and only when the rebuild cannot cost anything: it
+   * reads the sheet, so a link captured but not yet written into the sheet would
+   * be dropped by it. That is worth far more than the time this saves.
+   *
+   * @returns {Promise<boolean>} whether the catalog was rebuilt
+   */
+  function catchUpWithSheet(data, file) {
+    var status = data.run.status;
+    if (status !== S.STATUS.IDLE && status !== S.STATUS.DONE) return Promise.resolve(false);
+
+    var column = currentMapping().link;
+    if (!column || column !== (file.mapping || {}).link) return Promise.resolve(false);
+
+    var inSheet = {};
+    sheetData.rows.forEach(function (r) {
+      var link = U.fygaroLink(r.cells[column]);
+      if (link) inSheet[r.r] = link;
+    });
+
+    var unsaved = data.rows.filter(function (r) { return r.link && inSheet[r.sheetRow] !== r.link; });
+    if (unsaved.length) {
+      note('warn', unsaved.length + ' captured link' + (unsaved.length === 1 ? ' is' : 's are') +
+        ' not in the spreadsheet yet, so the catalog was left as it was. Save it first, then load ' +
+        'the file again.');
+      return Promise.resolve(false);
+    }
+
+    var late = data.rows.filter(function (r) { return !r.link && inSheet[r.sheetRow]; });
+    if (!late.length) return Promise.resolve(false);
+
+    note('info', late.length + ' row' + (late.length === 1 ? '' : 's') +
+      ' already had a link in the spreadsheet, so the catalog was read again and ' +
+      (late.length === 1 ? 'it will be' : 'they will be') + ' skipped.');
+    return Promise.resolve(applyMapping()).then(function () { return true; });
+  }
+
+  function loadSheet(name) {
+    var detected = readSheetInto(name, true);
 
     renderMappingChoices(headerInfo, detected, proposed.link);
     setHidden($('fileEmpty'), true);
@@ -649,20 +772,10 @@
    */
   function rereadSheet(name) {
     var keep = currentMapping();
-    sheetData = workbook.readSheet(name);
-    headerInfo = X.readHeader(sheetData);
-
-    /*
-     * The save wrote the Link and Nota headings, so columns that were proposals
-     * a moment ago are ordinary headers now. They have to stop being offered as
-     * new, or the picker lists each of them twice.
-     */
-    proposed = { link: '', note: '' };
-    if (!X.findColumn(headerInfo, S.HEADERS.link)) proposed.link = keep.link;
-    var foundNote = X.findColumn(headerInfo, S.HEADERS.note);
-    if (foundNote) noteColumn = foundNote;
-    else proposed.note = noteColumn;
-
+    // The save wrote the Link and Nota headings, so columns that were proposals
+    // a moment ago are ordinary headers now and must stop being offered as new,
+    // or the picker lists each of them twice.
+    readSheetInto(name, false);
     renderMappingChoices(headerInfo, keep, proposed.link);
   }
 
@@ -1750,15 +1863,16 @@
         var file = data.run.file;
         renderSheetChoices(wb, file ? file.sheetName : pickSheet(wb));
         if (file) {
-          sheetData = wb.readSheet(file.sheetName);
-          headerInfo = X.readHeader(sheetData);
-          renderMappingChoices(headerInfo, file.mapping || {});
+          readSheetInto(file.sheetName, false);
+          renderMappingChoices(headerInfo, file.mapping || {}, proposed.link);
           fileName = file.name || fileName;
           setHidden($('fileEmpty'), true);
           setHidden($('fileLoaded'), false);
           setHidden($('btnChangeFile'), false);
           $('fileSummary').textContent = 'Loaded from ' + fileName + '.';
-          return ensureImagesFitted(file.sheetName).then(function () { return wb; });
+          return ensureImagesFitted(file.sheetName)
+            .then(function () { return catchUpWithSheet(data, file); })
+            .then(function () { return wb; });
         }
         return wb;
       });
