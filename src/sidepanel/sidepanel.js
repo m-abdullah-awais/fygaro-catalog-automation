@@ -110,9 +110,13 @@
    * an xlsx the first time it was closed.
    */
   function storeWorkbook(name, bytes) {
+    // A save hands back a Blob and a file pick hands back the raw bytes. Taking
+    // either avoids reading a 64 MB Blob into an ArrayBuffer only to wrap it in
+    // a Blob again.
+    var blob = bytes instanceof Blob ? bytes : new Blob([bytes]);
     return FYG.idb.run('workbook', 'readwrite', function (store) {
-      store.put(new Blob([bytes]), 'bytes');
-      return store.put({ name: name, size: bytes.length, savedAt: Date.now() }, 'meta');
+      store.put(blob, 'bytes');
+      return store.put({ name: name, size: blob.size, savedAt: Date.now() }, 'meta');
     }).catch(function (err) {
       // Not fatal: the run still works, only the xlsx export needs the file back.
       note('warn', 'The catalog file could not be cached: ' + err.message);
@@ -630,6 +634,36 @@
     // needs the first picture immediately, and this is a one time cost on a
     // load that already takes a few seconds.
     return storeImages(imageIndex).then(applyMapping);
+  }
+
+  /**
+   * Re-reads the sheet out of the workbook, keeping the mapping already chosen.
+   *
+   * Used after a save has been folded back in, so the columns on screen describe
+   * the file as it now stands. It deliberately does not call applyMapping: that
+   * rebuilds the row table and hands it to the worker, which mid run would throw
+   * away the progress this very save was protecting.
+   *
+   * The pictures are left alone. Only the worksheet part was rewritten, so the
+   * drawings and the media behind them are exactly as they were read.
+   */
+  function rereadSheet(name) {
+    var keep = currentMapping();
+    sheetData = workbook.readSheet(name);
+    headerInfo = X.readHeader(sheetData);
+
+    /*
+     * The save wrote the Link and Nota headings, so columns that were proposals
+     * a moment ago are ordinary headers now. They have to stop being offered as
+     * new, or the picker lists each of them twice.
+     */
+    proposed = { link: '', note: '' };
+    if (!X.findColumn(headerInfo, S.HEADERS.link)) proposed.link = keep.link;
+    var foundNote = X.findColumn(headerInfo, S.HEADERS.note);
+    if (foundNote) noteColumn = foundNote;
+    else proposed.note = noteColumn;
+
+    renderMappingChoices(headerInfo, keep, proposed.link);
   }
 
   /**
@@ -1227,6 +1261,33 @@
    * @param {boolean} silent an autosave, so nothing may pop up in front of
    *   someone who is not watching
    */
+  /**
+   * Brings the panel's copy of the workbook up to what was just saved.
+   *
+   * Without this the panel holds the bytes it first read for as long as it is
+   * open, and the cache it restores from holds them for far longer than that.
+   * Both then disagree with the file on disk about the one column that decides
+   * whether a row still needs doing. The row reads as having no link, so it is
+   * sent to Fygaro, where the product already exists, and the run spends its
+   * time rediscovering work it finished yesterday.
+   *
+   * Nothing here is allowed to fail the save. The links are on disk by the time
+   * it runs, which was the point.
+   */
+  function adoptSave(plan, blob) {
+    return Promise.resolve()
+      .then(function () {
+        X.adoptColumns(workbook, plan.sheetName, plan.batches);
+        rereadSheet(plan.sheetName);
+        return blob ? storeWorkbook(fileName, blob) : null;
+      })
+      .catch(function (err) {
+        note('warn', 'The saved links could not be folded back into the loaded copy: ' +
+          (err && err.message ? err.message : err) +
+          ' Reload the catalog file before the next run so finished rows are recognised.');
+      });
+  }
+
   function saveWorkbook(silent) {
     if (saving || !workbook) return Promise.resolve(false);
 
@@ -1244,8 +1305,11 @@
     saving = true;
     $('btnExportXlsx').disabled = true;
 
+    var written = null;
+
     return X.writeColumns(workbook, plan.sheetName, plan.batches)
       .then(function (blob) {
+        written = blob;
         if (!where.handle) {
           download(blob, X.exportName(fileName || 'catalogo.xlsx'));
           note('success', 'Saved ' + plan.links + ' links into a downloaded copy of the workbook.');
@@ -1269,7 +1333,7 @@
         // stop dead behind a dialog nobody is there to dismiss.
         lastSaveMessage = 'Saved ' + plan.links + ' link' + (plan.links === 1 ? '' : 's') +
           ' at ' + U.clockTime() + '.';
-        return true;
+        return adoptSave(plan, written).then(function () { return true; });
       })
       .catch(function (err) {
         var message = err && err.message ? err.message : String(err);

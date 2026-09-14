@@ -145,8 +145,9 @@ plain JavaScript, and the spreadsheet is read and written using the browser's ow
 
 A run of 2073 rows takes tens of hours end to end, so the Catalog card lets you set a row range and work
 through it in batches. You do not have to sit through it. Progress is written to disk after every step, so
-you can pause, stop, close the panel, or even restart the browser and pick up where you left off. Rows that
-already have a link are skipped, which is what makes resuming safe.
+you can pause, stop, close the panel, or even restart the browser and pick up where you left off. Rows whose
+link column already holds a Fygaro link are skipped without the browser being opened at all, which is what
+makes resuming safe. A row is only counted as done once its link has actually been saved into the file.
 
 ---
 
@@ -367,8 +368,9 @@ validations, drawings and the hyperlink that was already there. Only the cells i
 link differ.
 
 The workbook is cached inside the extension, so exporting still works after you close the panel or restart
-the browser. If the cache is ever lost, load the same file again, or use the CSV export which needs no file
-at all.
+the browser. Every save updates that cached copy as well as the file, so the links you have already captured
+are still recognised as done when you come back to it tomorrow and start the next batch. If the cache is ever
+lost, load the same file again, or use the CSV export which needs no file at all.
 
 ---
 

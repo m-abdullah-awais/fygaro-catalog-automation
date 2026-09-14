@@ -163,6 +163,24 @@
   };
 
   /**
+   * Applies every batch to one worksheet part and hands back the new bytes.
+   * @returns {{path: string, bytes: Uint8Array}}
+   */
+  function patchSheetPart(wb, sheetName, batches) {
+    var sheet = wb.findSheet(sheetName);
+    if (!sheet) throw new Error('Sheet "' + sheetName + '" was not found in this workbook.');
+    var bytes = wb.files.get(sheet.path);
+    if (!bytes) throw new Error('Sheet part "' + sheet.path + '" is missing from the file.');
+
+    var xml = new TextDecoder('utf-8').decode(bytes);
+    (batches || []).forEach(function (batch) {
+      if (!batch || !batch.column || !batch.updates || !batch.updates.length) return;
+      xml = X.patchSheetXml(xml, batch.column, batch.updates);
+    });
+    return { path: sheet.path, bytes: new TextEncoder().encode(xml) };
+  }
+
+  /**
    * Applies several column batches, then rebuilds the file once.
    * @param {object} wb workbook handle from FYG.xlsx.load
    * @param {string} sheetName
@@ -171,23 +189,42 @@
    */
   X.writeColumns = function (wb, sheetName, batches) {
     return Promise.resolve().then(function () {
-      var sheet = wb.findSheet(sheetName);
-      if (!sheet) throw new Error('Sheet "' + sheetName + '" was not found in this workbook.');
-      var bytes = wb.files.get(sheet.path);
-      if (!bytes) throw new Error('Sheet part "' + sheet.path + '" is missing from the file.');
-
-      var xml = new TextDecoder('utf-8').decode(bytes);
-      (batches || []).forEach(function (batch) {
-        if (!batch || !batch.column || !batch.updates || !batch.updates.length) return;
-        xml = X.patchSheetXml(xml, batch.column, batch.updates);
-      });
+      var patched = patchSheetPart(wb, sheetName, batches);
 
       // Write into a copy of the file table so the loaded workbook stays intact
       // and the user can export again after more rows finish.
       var files = new Map(wb.files);
-      files.set(sheet.path, new TextEncoder().encode(xml));
+      files.set(patched.path, patched.bytes);
       return FYG.zip.write(wb.order, files);
     });
+  };
+
+  /**
+   * Folds the same batches into the loaded workbook itself.
+   *
+   * X.writeColumns deliberately leaves wb untouched, which is right for an
+   * export: it is a copy taken at a moment, and the workbook goes on being the
+   * file that was opened. It is wrong once those bytes have been written back to
+   * disk, because the workbook is then a stale account of a file that has moved
+   * on, and the staleness is not cosmetic. Every link is invisible to the next
+   * read of that sheet, so the rows holding them stop being recognised as done
+   * and are offered to Fygaro a second time.
+   *
+   * Call it only after the write has actually landed, so a save that failed
+   * leaves the workbook describing what is really on disk.
+   *
+   * @param {object} wb workbook handle from FYG.xlsx.load
+   * @param {string} sheetName
+   * @param {Array<{column: string, updates: Array<{row: number, value: string}>}>} batches
+   * @returns {object} the same workbook handle
+   */
+  X.adoptColumns = function (wb, sheetName, batches) {
+    var patched = patchSheetPart(wb, sheetName, batches);
+    wb.files.set(patched.path, patched.bytes);
+    // readSheet remembers what it read, so without this the workbook would hold
+    // the new bytes and go on reporting the old ones.
+    if (typeof wb.forgetSheet === 'function') wb.forgetSheet(sheetName);
+    return wb;
   };
 
   /**

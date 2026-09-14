@@ -1202,8 +1202,13 @@
         handlePermission = 'denied';
         recorded.alerts.length = 0;
 
-        $('btnExportXlsx').click();
-        return waitUntil(function () { return recorded.alerts.length > 0; }, 'the failure to be reported')
+        // A save in flight disables the button and ignores a second press, so
+        // wait for the last one to settle rather than pressing into it.
+        return waitUntil(function () { return !$('btnExportXlsx').disabled; }, 'the last save to settle')
+          .then(function () { $('btnExportXlsx').click(); })
+          .then(function () {
+            return waitUntil(function () { return recorded.alerts.length > 0; }, 'the failure to be reported');
+          })
           .then(function () {
             assert(savedToDisk === null, 'nothing may be written without permission');
             var said = recorded.alerts[recorded.alerts.length - 1];
@@ -1342,6 +1347,110 @@
                 return 'existing product, no link, link created and captured';
               });
           });
+      });
+    })
+
+    .then(function () {
+      return check('a saved link is recognised as done, in the panel and in the cache', function () {
+        /*
+         * Saving used to write the links to disk and no further. The panel kept
+         * the bytes it first read, and cached those same bytes for the next
+         * session, so the column that decides whether a row is finished still
+         * read as empty in both. Re-reading the catalog handed every one of
+         * those rows back as work to do, and the run sent them to Fygaro, where
+         * the product already existed and the search for its link began.
+         */
+        confirmAnswer = true;
+        $('targetCopy').checked = true;
+        $('targetCopy').dispatchEvent(new Event('change'));
+        recorded.downloads.length = 0;
+
+        // The panel saves what it has been told about, and the checks before
+        // this one drive the worker directly, so let its view catch up first.
+        // Saving a row the panel has not heard of yet would leave that row out
+        // of the file and make this read as the very bug it is testing for.
+        return readState().then(function (state) {
+          var done = String(state.run.stats.done);
+          return waitUntil(function () {
+            return $('statDone').textContent === done && !$('btnExportXlsx').disabled;
+          }, 'the panel to catch up with the run', 20000);
+        })
+          // Links captured since the last save are not in the file yet, and a
+          // row is only expected back as finished once its link has landed.
+          .then(function () { $('btnExportXlsx').click(); })
+          .then(function () {
+            return waitUntil(function () {
+              return recorded.downloads.length > 0 && !$('btnExportXlsx').disabled;
+            }, 'every captured link to be saved', 20000);
+          })
+          .then(readState).then(function (before) {
+          var linked = before.rows.filter(function (r) { return r.link; });
+          assert(linked.length > 0, 'the run should have captured a link by now');
+
+          // Proved against the file first, so a row that comes back unfinished
+          // says whether the save missed it or the reload did.
+          return recorded.downloads[recorded.downloads.length - 1].arrayBuffer()
+            .then(function (buffer) { return X.load(new Uint8Array(buffer)); })
+            .then(function (wb) {
+              var inFile = {};
+              wb.readSheet(SHEET).rows.forEach(function (r) { inFile[r.r] = r.cells.I || ''; });
+              linked.forEach(function (row) {
+                assert(inFile[row.sheetRow] === row.link,
+                  'the save left sheet row ' + row.sheetRow + ' as "' + inFile[row.sheetRow] + '"');
+              });
+              return before;
+            });
+        }).then(function (before) {
+          var linked = before.rows.filter(function (r) { return r.link; });
+          var cached = {};
+
+          assert($('statDone').textContent !== '0', 'the panel should be showing finished rows');
+
+          // The mapping is re-applied exactly as a user re-applies it, by
+          // touching the range, so the rows are rebuilt from the sheet.
+          $('rowTo').dispatchEvent(new Event('change'));
+
+          // A rebuild can only ever hand back rows to do, set aside or blocked,
+          // so Done falling to nothing is the rebuild landing rather than any
+          // claim about what this test is here to prove.
+          return waitUntil(function () {
+            return $('statDone').textContent === '0';
+          }, 'the catalog to be rebuilt', 20000)
+            // The cache is the half that matters tomorrow: it is what the panel
+            // restores from when it is opened again. Read first, so a row that
+            // comes back unfinished can say which copy it went missing from.
+            .then(function () {
+              return FYG.idb.run('workbook', 'readonly', function (st) { return st.get('bytes'); });
+            }).then(function (blob) {
+              assert(blob, 'the workbook was not cached at all');
+              return blob.arrayBuffer();
+            }).then(function (buffer) {
+              return X.load(new Uint8Array(buffer));
+            }).then(function (wb) {
+              wb.readSheet(SHEET).rows.forEach(function (r) { cached[r.r] = r.cells.I || ''; });
+              assert(cached[1] === 'Link', 'the cached copy is missing the Link header');
+              linked.forEach(function (row) {
+                assert(cached[row.sheetRow] === row.link,
+                  'the cached copy has "' + cached[row.sheetRow] + '" in row ' + row.sheetRow);
+              });
+              return readState();
+            }).then(function (after) {
+            linked.forEach(function (row) {
+              var now = after.rows.filter(function (r) { return r.sheetRow === row.sheetRow; })[0];
+              assert(now, 'sheet row ' + row.sheetRow + ' vanished from the catalog');
+              assert(now.status === S.ROW.SKIPPED,
+                'sheet row ' + row.sheetRow + ' came back as ' + now.status + ', not skipped, ' +
+                'though the file it was read from has ' + JSON.stringify(cached[row.sheetRow]) +
+                ' under column ' + $('mapLink').value);
+              assert(now.reason === S.SKIP.HAD_LINK,
+                'sheet row ' + row.sheetRow + ' was skipped for "' + now.reason + '"');
+              assert(now.link === row.link,
+                'sheet row ' + row.sheetRow + ' kept the link "' + now.link + '"');
+            });
+            assert(after.run.stats.failed === 0, 'a saved row was counted as a failure');
+            return linked.length + ' saved links recognised on reload, and present in the cache';
+          });
+        });
       });
     })
 

@@ -126,6 +126,19 @@
       };
 
       /**
+       * Drops the remembered reading of a sheet.
+       *
+       * readSheet is memoised because a 2400 row sheet is parsed on every
+       * mapping change and the answer cannot move on its own. It can be moved
+       * deliberately though, by writing links back into the part this workbook
+       * holds, and a reading taken before that is worse than no reading at all:
+       * the rows that were just finished still look untouched.
+       */
+      wb.forgetSheet = function (name) {
+        wb._sheetCache.delete(name);
+      };
+
+      /**
        * Reads a sheet as rows of plain text.
        * @returns {{name: string, path: string, rows: Array<{r: number, cells: object}>, maxRow: number}}
        */

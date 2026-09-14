@@ -249,6 +249,53 @@ test('two columns are written in one pass and only the worksheet part changes', 
   assert.ok(table.includes('<tableColumns count="8">'), 'the table must still declare 8 columns');
 });
 
+test('adoptColumns folds a save back in, so the next read sees the links', async () => {
+  const arch = await zip.read(original);
+  const wb = { order: arch.order, files: arch.files, findSheet: () => ({ path: SHEET_PART }) };
+  const batches = [
+    { column: 'I', updates: [{ row: 1, value: 'Link' }, { row: 2, value: 'https://example.test/a/' }] },
+    { column: 'J', updates: [{ row: 1, value: 'Nota' }, { row: 3, value: 'El precio es cero.' }] }
+  ];
+
+  const before = wb.files.get(SHEET_PART);
+  await xlsx.writeColumns(wb, 'Logros ', batches);
+  assert.deepEqual(wb.files.get(SHEET_PART), before, 'an export must leave the workbook alone');
+
+  /*
+   * The panel held the bytes it first read for as long as it stayed open, and
+   * cached those same bytes for every session after. So a row whose link had
+   * been written to disk still read as having none, and was handed to Fygaro
+   * again, where the product already existed. Adopting is what closes that.
+   */
+  xlsx.adoptColumns(wb, 'Logros ', batches);
+  const adopted = new TextDecoder().decode(wb.files.get(SHEET_PART));
+  assert.match(cellIn(adopted, 'I1'), /Link/, 'the heading must be in the workbook now');
+  assert.match(cellIn(adopted, 'I2'), /example\.test/, 'the link must be in the workbook now');
+  assert.match(cellIn(adopted, 'J3'), /precio/, 'the note must be in the workbook now');
+
+  // Applied twice, as it is when a run autosaves every five links, it must not
+  // double up a cell or drift from what one pass produces.
+  xlsx.adoptColumns(wb, 'Logros ', batches);
+  const twice = new TextDecoder().decode(wb.files.get(SHEET_PART));
+  assert.equal(twice, adopted, 'adopting the same batch again must change nothing');
+
+  // Saving after adopting carries the earlier links as well as the later ones,
+  // which is what makes an interrupted run resumable.
+  const blob = await xlsx.writeColumns(wb, 'Logros ', [
+    { column: 'I', updates: [{ row: 4, value: 'https://example.test/b/' }] }
+  ]);
+  const rebuilt = await zip.read(new Uint8Array(await blob.arrayBuffer()));
+  const xml = new TextDecoder().decode(rebuilt.files.get(SHEET_PART));
+  assert.match(cellIn(xml, 'I2'), /example\.test\/a/, 'the adopted link must survive the next save');
+  assert.match(cellIn(xml, 'I4'), /example\.test\/b/, 'the new link must be saved too');
+
+  // Only the worksheet may ever differ, adopted or not.
+  const changed = arch.order.filter(
+    (n) => Buffer.compare(Buffer.from(rebuilt.files.get(n)), Buffer.from(arch.files.get(n))) !== 0
+  );
+  assert.deepEqual(changed, [SHEET_PART], 'only the worksheet may differ');
+});
+
 test('the export file name is derived from the original', () => {
   const name = xlsx.exportName('Catálogo de Productos y Servicios Fygaro.xlsx');
   assert.match(name, /^Catálogo de Productos y Servicios Fygaro \(con Links\) \d{4}-\d{2}-\d{2}\.xlsx$/);
