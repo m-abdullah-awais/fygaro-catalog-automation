@@ -1128,12 +1128,27 @@
     // Writing back in place needs a handle to the file, which only the file
     // picker can give. A dropped or input chosen file is bytes and nothing more.
     var canOverwrite = !!fileHandle;
-    $('targetOriginal').disabled = !canOverwrite;
-    if (!canOverwrite && $('targetOriginal').checked) $('targetCopy').checked = true;
-
     var canPickOutput = typeof window.showSaveFilePicker === 'function';
+    $('targetOriginal').disabled = !canOverwrite;
     $('targetNewFile').disabled = !canPickOutput;
-    if (!canPickOutput && $('targetNewFile').checked) $('targetCopy').checked = true;
+
+    /*
+     * Which destination is selected is worked out here rather than held in the
+     * markup, so it cannot drift from what is actually possible. The choice
+     * itself is a setting, which is what makes it survive the panel being
+     * closed, and updating the catalog is the default.
+     *
+     * A destination that is not available falls back to a download without the
+     * setting being touched. Picking the catalog with the file picker is what
+     * makes writing in place possible, and when that happens the default takes
+     * effect rather than the user having to go back and choose it.
+     */
+    var wanted = (view.run.settings && view.run.settings.saveTarget) || S.SAVE_TARGET.ORIGINAL;
+    if (wanted === S.SAVE_TARGET.ORIGINAL && !canOverwrite) wanted = S.SAVE_TARGET.COPY;
+    if (wanted === S.SAVE_TARGET.NEWFILE && !canPickOutput) wanted = S.SAVE_TARGET.COPY;
+    $('targetOriginal').checked = wanted === S.SAVE_TARGET.ORIGINAL;
+    $('targetNewFile').checked = wanted === S.SAVE_TARGET.NEWFILE;
+    $('targetCopy').checked = wanted === S.SAVE_TARGET.COPY;
 
     $('targetOriginalNote').textContent = canOverwrite
       ? 'Writes the links straight into ' + U.truncate(fileName, 44) + '. Close it in Excel first, or ' +
@@ -1800,7 +1815,12 @@
     ['targetCopy', 'targetOriginal', 'targetNewFile'].forEach(function (id) {
       $(id).addEventListener('change', function () {
         savedLinkCount = -1;
+        // Held here as well as sent, because the render below reads the setting
+        // and the worker has not been told yet. Without it the choice that was
+        // just made is undone in front of the person who made it.
+        view.run.settings.saveTarget = $(id).value;
         renderExport(view.rows);
+        send(S.MSG.UPDATE_SETTINGS, { settings: { saveTarget: $(id).value } });
 
         // Both of these need a live click, which this is. Asking now means the
         // run cannot get hours in and then discover it has nowhere to write.

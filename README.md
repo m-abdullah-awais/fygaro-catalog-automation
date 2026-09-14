@@ -334,8 +334,13 @@ repair it.
 | Option | What happens |
 |--------|--------------|
 | **Save into a new file** | Pick where it goes once. Kept up to date from then on, original untouched. |
-| **Update the original file** | Writes the links straight into the file you chose, as the run goes. |
+| **Update the original file** | Writes the links straight into the file you chose, as the run goes. **The default.** |
 | **Download a copy at the end** | One download when the run stops. Nothing is written while it runs. |
+
+Updating the original is chosen for you as soon as it is possible, which means as soon as you pick your
+catalog with the **Choose your catalog** button rather than dropping it in. Until then the panel falls back
+to downloading a copy, because that is the only destination that works without a file it can write to. Your
+choice is remembered, so if you pick something else it stays picked the next time you open the panel.
 
 The first two save themselves about every 5 links, and again whenever the run stops for any reason:
 finished, stopped by hand, paused, or waiting for you. **Leave the side panel open** so it can, since that
@@ -551,7 +556,9 @@ appearance can be retuned from one place.
 
 - Your spreadsheet is read **in the browser** and is never uploaded anywhere.
 - The extension talks to no server of its own. Its only host permission is `https://www.fygaro.com/*`.
-- Your original file on disk is never modified unless you pick **Update the original file** yourself.
+- Your original file on disk is modified only under **Update the original file**, which is the default once
+  the file was picked in a way that allows it. Switch to one of the other two if you would rather it was not,
+  and the panel will remember that.
 - Nothing happens until you press Start. Dry run lets you prove the whole flow without creating a record.
 - Your Fygaro credentials are never seen or handled. The extension uses the session you already opened.
 

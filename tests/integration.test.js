@@ -438,7 +438,18 @@
             assert(!$('btnStart').disabled, 'Start should now be enabled');
             assert(!$('targetOriginal').disabled,
               'picking the file should make updating the original possible');
-            return '30 rows, a new column I proposed, and the original file is writable';
+
+            /*
+             * Chosen for the user, not left to them. Updating the catalog is the
+             * only destination that needs nothing else picked and nothing else
+             * remembered, and the download it used to default to keeps a whole
+             * run's links in the panel until someone presses a button.
+             */
+            assert($('targetOriginal').checked,
+              'updating the original should be chosen as soon as it is possible');
+            assert($('btnExportXlsx').textContent === 'Save now',
+              'the save button still says "' + $('btnExportXlsx').textContent + '"');
+            return '30 rows, a new column I proposed, and the original file is the destination';
           });
       });
     })
@@ -1093,7 +1104,11 @@
           var done = data.rows.filter(function (r) { return r.status === S.ROW.DONE; });
           assert(done.length === 2, 'expected 2 finished rows, saw ' + done.length);
 
+          // This check is about what lands in the workbook, so it asks for the
+          // destination it wants rather than riding on whichever is the default.
           recorded.downloads.length = 0;
+          $('targetCopy').checked = true;
+          $('targetCopy').dispatchEvent(new Event('change'));
           $('btnExportXlsx').click();
 
           return waitUntil(function () { return recorded.downloads.length > 0; }, 'the export', 20000)
@@ -1697,7 +1712,11 @@
               assert(row.link === unsaved,
                 'the unsaved link was thrown away, it now reads "' + row.link + '"');
               assert(row.status === S.ROW.DONE, 'the row is "' + row.status + '", expected done');
-              return 'an unsaved link survived the reopen';
+              // The destination is a setting, so it comes back with the panel
+              // rather than dropping to a download every time it is reopened.
+              assert($('targetOriginal').checked,
+                'the reopened panel lost the destination and would download instead');
+              return 'an unsaved link survived the reopen, destination intact';
             });
         });
       });

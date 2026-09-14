@@ -146,6 +146,11 @@
       spreadsheet is then written for you as the run goes along, so a run that stops early keeps
       everything it had already captured.</p>
 
+    <!-- Which of these is selected is decided by the panel, from the saveTarget
+         setting and from what is actually possible for the file you loaded. The
+         default is in S.DEFAULT_SETTINGS. Downloading a copy is checked here
+         only because it is the one destination that is always available, so it
+         is the safe thing to show for the moment before the panel knows. -->
     <div class="destination" role="radiogroup" aria-label="Where to save the links">
       <label class="toggle">
         <input type="radio" name="saveTarget" id="targetNewFile" value="newfile">

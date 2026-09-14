@@ -182,7 +182,19 @@
      * control is on screen. Zooming out gives the page its room back and keeps
      * the desktop layout, so the DOM stays the one the steps were written for. */
     zoomPercent: 67,
-    dryRun: false
+    dryRun: false,
+    /* Writing straight into the catalog is the default because it is the only
+     * destination that needs nothing remembered and nothing chosen afterwards.
+     * It is offered only once the file was picked in a way that can be written
+     * back to, so the panel falls back to a download until then. */
+    saveTarget: 'original'
+  };
+
+  /** Where a save goes. Kept here because both the markup and the panel name them. */
+  S.SAVE_TARGET = {
+    ORIGINAL: 'original',
+    NEWFILE: 'newfile',
+    COPY: 'copy'
   };
 
   /** URL shapes the automation recognises. */
