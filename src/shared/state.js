@@ -21,6 +21,22 @@
   S.KEY_FILE = 'fyg_file';
   S.LOG_CAP = 500;
 
+  /*
+   * How long the panel waits for the worker before saying it is not answering.
+   *
+   * Measured behaviour, not a guess: when the worker fails to start, which a
+   * missing shared file does to it, chrome.runtime.sendMessage from the panel
+   * never settles at all. It does not reject and it does not resolve, so there
+   * is nothing to catch and the only way to notice is to stop waiting.
+   *
+   * Ten seconds because no message the worker handles legitimately takes that
+   * long, and a dead worker is a permanent condition, so there is no hurry. Once
+   * it is known to be silent the wait drops, or every button would hang for ten
+   * seconds each while telling the user something it already knew.
+   */
+  S.WORKER_SILENT_MS = 10000;
+  S.WORKER_RETRY_MS = 2000;
+
   /** Run level status. */
   S.STATUS = {
     IDLE: 'idle',

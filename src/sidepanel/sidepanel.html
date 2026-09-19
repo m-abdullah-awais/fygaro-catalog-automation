@@ -29,6 +29,22 @@
   </section>
 
   <!--
+    Shown when the background worker does not answer.
+
+    The panel reads chrome.storage directly, so it renders the catalog, the
+    stats and the log perfectly well while the worker is dead, and every button
+    then does nothing whatsoever. This is the only thing that says so. It is
+    outside the numbered cards because it applies to all of them.
+  -->
+  <section class="banner attention hidden" id="workerBanner">
+    <h3>The extension is not running properly</h3>
+    <p id="workerMessage"></p>
+    <div class="actions">
+      <button type="button" class="primary" id="btnReloadExtension">Reload the extension</button>
+    </div>
+  </section>
+
+  <!--
     Unnumbered on purpose, and first. This acts on whatever is already open in
     the Fygaro tab rather than on the run being prepared below it, so it is not
     a step in that sequence and numbering it would imply an order that does not

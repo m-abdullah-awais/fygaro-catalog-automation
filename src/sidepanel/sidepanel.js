@@ -30,6 +30,9 @@
 
   /* Confirmation of the last successful save, shown in the Saving card. */
   var lastSaveMessage = '';
+  /* Set once the worker has missed a deadline, so the next command does not
+   * sit through the whole wait again before saying the same thing. */
+  var workerDown = false;
 
   /*
    * Where saves go, when the browser gave us somewhere to write.
@@ -90,9 +93,74 @@
 
   var $ = function (id) { return document.getElementById(id); };
 
+  /*
+   * Every command to the worker goes through here, and every one of them is
+   * given a deadline.
+   *
+   * When the worker fails to start, which a missing shared file does to it,
+   * sendMessage NEVER SETTLES. It does not reject, so there is nothing to catch,
+   * and it does not resolve, so every .then after it is dead too. Meanwhile the
+   * panel reads chrome.storage directly and looks perfectly healthy: the catalog
+   * is there, the stats are there, and every button does absolutely nothing.
+   * That combination is what reached a user as "it just updates its state and
+   * nothing happens on the screen", with a plain importScripts error sitting in
+   * chrome://extensions the whole time.
+   *
+   * So the wait is bounded and the silence is reported. The result is still null
+   * on failure, so no caller had to change, and callers now get their .then back
+   * rather than hanging for ever.
+   */
   function send(type, payload) {
-    return chrome.runtime.sendMessage(Object.assign({ type: type }, payload || {}))
-      .catch(function () { return null; });
+    var wait = workerDown ? S.WORKER_RETRY_MS : S.WORKER_SILENT_MS;
+
+    return new Promise(function (resolve) {
+      var settled = false;
+
+      var timer = setTimeout(function () {
+        if (settled) return;
+        settled = true;
+        workerSilent(null, wait);
+        resolve(null);
+      }, wait);
+
+      chrome.runtime.sendMessage(Object.assign({ type: type }, payload || {})).then(
+        function (result) {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          workerAnswered();
+          resolve(result);
+        },
+        function (err) {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          workerSilent(err, wait);
+          resolve(null);
+        }
+      );
+    });
+  }
+
+  /*
+   * Deliberately not routed through note(). The log is written by asking the
+   * worker, so a worker that cannot answer cannot be told that it cannot answer.
+   */
+  function workerSilent(err, waited) {
+    workerDown = true;
+    var why = err && err.message
+      ? 'Chrome said: ' + err.message
+      : 'It did not answer within ' + Math.round(waited / 1000) + ' seconds.';
+
+    $('workerMessage').textContent = 'The background worker is not running, so nothing this panel asks ' +
+      'for can happen. Open chrome://extensions, press Reload under Fygaro Catalog Automation, and read ' +
+      'its Errors: a file that failed to load there stops the whole extension. ' + why;
+    setHidden($('workerBanner'), false);
+  }
+
+  function workerAnswered() {
+    workerDown = false;
+    setHidden($('workerBanner'), true);
   }
 
   function setHidden(el, hidden) {
@@ -1850,6 +1918,13 @@
     $('btnExportCsv').addEventListener('click', exportCsv);
     $('btnCopyLinks').addEventListener('click', copyLinks);
 
+    /*
+     * Reloading is the fix when the worker died on a file that is now there,
+     * and it is harmless otherwise. It takes the panel down with it, which is
+     * expected: Chrome reopens it.
+     */
+    $('btnReloadExtension').addEventListener('click', function () { chrome.runtime.reload(); });
+
     $('btnCopyLog').addEventListener('click', function () {
       var text = view.log.map(function (e) {
         return U.clockTime(e.ts) + '  [' + e.level + ']  ' + e.message;
@@ -1870,6 +1945,14 @@
   // workbook back takes a moment, and the panel should show the run it already
   // knows about rather than sitting blank until a database answers.
   refresh();
+
+  /*
+   * Ask the worker for nothing in particular, just to find out whether it is
+   * there. GET_STATE has no side effects and exists for this. Without it the
+   * first sign of a dead worker is a button that does nothing, which is a much
+   * worse way to learn.
+   */
+  send(S.MSG.GET_STATE);
 
   // The file handle comes back first, so the panel knows straight away whether
   // updating the original file is possible for the workbook it is about to load.

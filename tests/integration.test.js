@@ -27,6 +27,8 @@
 
   /* Whether a live content script is listening in the Fygaro tab. */
   var contentScriptPresent = false;
+  /* Simulates a service worker that failed to start: it never answers. */
+  var workerHangs = false;
   var pageAnswer = null;
   /* Set by a test that needs chrome.tabs.query to find an open Fygaro tab. */
   var fygaroTab = null;
@@ -152,6 +154,23 @@
       getURL: function (path) { return 'chrome-extension://test/' + path; },
       getManifest: function () { return manifestJson; },
       sendMessage: function (message) {
+        /*
+         * A worker that failed to start does not reject and does not resolve. It
+         * never settles at all, which was measured against a real Chrome with a
+         * shared file removed, and it is the reason the panel used to sit there
+         * looking healthy while every button did nothing whatsoever.
+         */
+        if (workerHangs) return new Promise(function () {});
+
+        /*
+         * With no listener at all Chrome rejects instead, which is what a missing
+         * content script gives. Resolving undefined here, as this used to, hid
+         * both failures from every test.
+         */
+        if (!messageListeners.length) {
+          return Promise.reject(new Error(
+            'Could not establish connection. Receiving end does not exist.'));
+        }
         return new Promise(function (resolve) {
           var answered = false;
           var settle = function (response) {
@@ -397,6 +416,7 @@
   }
 
   var $ = function (id) { return document.getElementById(id); };
+
 
   /* ----------------------------------------------------------------- suite */
 
@@ -1747,6 +1767,63 @@
             handlePermission = 'granted';
             return 'came back up on the cached copy, links and all';
           });
+      });
+    })
+
+    .then(function () {
+      return check('a worker that never started is reported, not silently ignored', function () {
+        /*
+         * What the client saw: the panel rendered its catalog and its stats, and
+         * every button did nothing at all. A failed importScripts kills the
+         * worker's top level, so its onMessage listener is never registered,
+         * while the panel carries on reading chrome.storage directly and looks
+         * perfectly healthy. Every send then rejects, and swallowing that is
+         * what turned a clear Chrome error into "it does nothing".
+         */
+        var realWait = S.WORKER_SILENT_MS;
+        var realRetry = S.WORKER_RETRY_MS;
+        S.WORKER_SILENT_MS = 300;
+        S.WORKER_RETRY_MS = 100;
+        workerHangs = true;
+
+        var restore = function () {
+          workerHangs = false;
+          S.WORKER_SILENT_MS = realWait;
+          S.WORKER_RETRY_MS = realRetry;
+        };
+
+        $('btnStart').disabled = false;
+        $('btnStart').click();
+
+        return waitUntil(function () {
+          return !$('workerBanner').classList.contains('hidden');
+        }, 'the panel to say the worker is not running', 4000)
+          .then(function () {
+            var said = $('workerMessage').textContent;
+            assert(/reload/i.test(said), 'it must say what to do, said: ' + said);
+            assert(/chrome:\/\/extensions/.test(said), 'it must say where to look, said: ' + said);
+            assert($('btnReloadExtension'), 'there is no way to act on it');
+
+            // And nothing pretended to have started.
+            return readState().then(function (data) {
+              assert(data.run.status !== S.STATUS.RUNNING,
+                'the run claims to be running on a worker that never answered');
+              return 'a worker that never answers is named rather than waited on for ever';
+            });
+          })
+          .then(function (detail) {
+            // It clears on the next command the worker answers, not on a render.
+            // Pinging from every render would put a message through the worker's
+            // single lock several times a minute during a run.
+            restore();
+            $('btnStop').disabled = false;
+            $('btnStop').click();
+            return waitUntil(function () {
+              return $('workerBanner').classList.contains('hidden');
+            }, 'the warning to clear once the worker answers again', 4000)
+              .then(function () { return detail + ', and it clears when it answers again'; });
+          })
+          .catch(function (err) { restore(); throw err; });
       });
     })
 

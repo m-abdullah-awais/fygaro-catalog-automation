@@ -605,9 +605,19 @@ was closed mid run it can be left applied. Reset it with Ctrl and 0 on the Fygar
 compare that against `require_phone`, `require_legal_id` and `require_billing_address`. If the names have
 changed, update `REQUIRED` in `src/content/steps.js`.
 
+**The panel shows your catalog, but no button does anything.** The background worker is not running. The
+panel reads its state straight from storage, so it fills itself in and looks perfectly healthy while nothing
+it asks for can actually happen. After about ten seconds a red banner at the top says so, and the Activity
+log stays empty because writing to it also goes through the worker.
+
+Press **Reload the extension** in that banner. If it comes straight back, open `chrome://extensions` and
+read the **Errors** under Fygaro Catalog Automation: a file that failed to load there stops everything, and
+the next entry explains that case.
+
 **"Failed to execute 'importScripts' on 'WorkerGlobalScope'."** The folder Chrome has loaded is missing one
 of the files the service worker imports, and the error names which one. Nothing in the extension runs when
-this happens, because that line is the first thing the worker does.
+this happens, because that line is the first thing the worker does, and the symptom you see in the panel is
+the one above: everything renders, nothing responds.
 
 It is almost always a stale or partial copy rather than a fault in the code. Open `chrome://extensions`,
 check the path shown under **Fygaro Catalog Automation**, and confirm the file the error named is really
