@@ -81,6 +81,37 @@ for (const path of new Set(referenced)) {
   try { statSync(join(root, path)); } catch { problems.push(`manifest.json references a missing file: ${path}`); }
 }
 
+/*
+ * The service worker's own imports have to resolve too.
+ *
+ * Nothing else checks these. The integration suite loads the worker in a page
+ * with importScripts stubbed to a no-op, because the shared files are already
+ * there as script tags, so a path that points at nothing passes every test and
+ * then stops the whole extension the first time it is loaded in a browser.
+ *
+ * A leading slash means from the extension root. Anything else is resolved
+ * against the worker's own folder, which is what the browser does.
+ */
+const workerPath = manifest.background.service_worker;
+const workerDir = dirname(workerPath);
+const workerSource = readFileSync(join(root, workerPath), 'utf8');
+
+for (const call of workerSource.matchAll(/importScripts\(([^)]*)\)/g)) {
+  const imports = [...call[1].matchAll(/['"]([^'"]+)['"]/g)].map((m) => m[1]);
+  if (!imports.length) {
+    problems.push(`${workerPath} calls importScripts with no readable path`);
+    continue;
+  }
+  for (const spec of imports) {
+    const target = spec.startsWith('/') ? spec.slice(1) : join(workerDir, spec);
+    try {
+      statSync(join(root, target));
+    } catch {
+      problems.push(`${workerPath} imports a missing file: ${spec}`);
+    }
+  }
+}
+
 if (problems.length) {
   console.error('Problems found:\n');
   for (const p of problems) console.error('  ' + p);

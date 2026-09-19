@@ -9,7 +9,22 @@
  */
 'use strict';
 
-importScripts('../shared/util.js', '../shared/state.js', '../shared/idb.js');
+/*
+ * Paths from the extension root, not relative to this file.
+ *
+ * Both resolve correctly: a relative path here is resolved against this script's
+ * own URL, so '../shared/util.js' does find src/shared/util.js. Root relative is
+ * used anyway because it is the one form that cannot be misread, it matches how
+ * the manifest and the side panel name every other file, and it stays right if
+ * this worker is ever moved.
+ *
+ * When one of these files is missing from the folder Chrome actually loaded, it
+ * surfaces here as "Failed to execute 'importScripts' on 'WorkerGlobalScope'"
+ * naming the file that is absent, and nothing else in the extension starts.
+ * npm run lint resolves every one of these paths, because the integration suite
+ * stubs importScripts to a no-op and so cannot.
+ */
+importScripts('/src/shared/util.js', '/src/shared/state.js', '/src/shared/idb.js');
 
 var FYG = self.FYG;
 var S = FYG.state;

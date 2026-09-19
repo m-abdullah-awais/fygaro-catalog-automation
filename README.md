@@ -468,7 +468,7 @@ src/content/
   main.js                            Route watching, the tick loop, the on page widget
 src/sidepanel/                       The interface: html, css and js
 tests/                               See below
-tools/                               Test runner, syntax checks, fixture generator
+tools/                               Test runner, syntax checks, extension check, fixtures
 docs/                                The implementation plan
 ```
 
@@ -481,9 +481,10 @@ docs/                                The implementation plan
 ## Testing
 
 ```bash
-npm test           # everything: node tests, then the browser pages
-npm run test:node  # price parsing and the zip and xlsx layers
-npm run lint       # syntax, house rules, and manifest references
+npm test                # everything: node tests, the browser pages, then a real Chrome
+npm run test:node       # price parsing and the zip and xlsx layers
+npm run test:extension  # loads the extension in Chrome and starts its service worker
+npm run lint            # syntax, house rules, manifest and service worker references
 ```
 
 `npm test` installs nothing. There are no dependencies to fetch.
@@ -523,6 +524,14 @@ a snapshot, check whether the page styles that control before trusting a green r
 
 The browser suites run headless via `tools/run-browser-tests.mjs`. Set `CHROME_PATH` if Chrome is somewhere
 unusual. The page snapshots come from `temp/html/` and are regenerated with `npm run fixtures`.
+
+`npm run test:extension` is the one check that loads the real extension into a real Chrome and confirms its
+**service worker actually starts**. Nothing else covers that: the integration suite loads the worker into a
+page with `importScripts` stubbed to a no-op, because the shared files are already there as script tags, so
+the worker's own imports are never resolved by any test. A path pointing at nothing would pass the whole
+suite and then stop the extension dead the first time it was loaded. `npm run lint` now resolves those paths
+statically as well, which catches a typo; the Chrome check catches the rest, including a shared file that
+throws while it evaluates.
 
 ---
 
@@ -595,6 +604,15 @@ was closed mid run it can be left applied. Reset it with Ctrl and 0 on the Fygar
 **"The Advanced Options panel did not open."** The error lists every checkbox actually on the form, so
 compare that against `require_phone`, `require_legal_id` and `require_billing_address`. If the names have
 changed, update `REQUIRED` in `src/content/steps.js`.
+
+**"Failed to execute 'importScripts' on 'WorkerGlobalScope'."** The folder Chrome has loaded is missing one
+of the files the service worker imports, and the error names which one. Nothing in the extension runs when
+this happens, because that line is the first thing the worker does.
+
+It is almost always a stale or partial copy rather than a fault in the code. Open `chrome://extensions`,
+check the path shown under **Fygaro Catalog Automation**, and confirm the file the error named is really
+there. Then remove the extension and **Load unpacked** it again from this folder, so Chrome stops holding
+whatever it had before. Run `npm run test:extension` to prove the folder is loadable before you reload it.
 
 **After a Fygaro redesign.** Run `npm run test:browser`. The locator suite reports exactly which lookup
 stopped matching.
